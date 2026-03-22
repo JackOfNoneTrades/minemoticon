@@ -14,4 +14,12 @@ public class EmojiConfig {
     @Config.DefaultInt(4)
     @Config.RangeInt(min = 1, max = 16)
     public static int maxDownloadThreads;
+
+    @Config.Comment("Emoji shown on the picker button (without colons)")
+    @Config.DefaultString("grinning")
+    public static String pickerButtonEmoji;
+
+    @Config.Comment("Close the picker after selecting an emoji")
+    @Config.DefaultBoolean(true)
+    public static boolean closePickerOnSelect;
 }

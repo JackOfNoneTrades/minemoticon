@@ -11,6 +11,8 @@ public class EmojiFromTwitmoji extends Emoji {
 
     private static final String TWEMOJI_CDN = "https://raw.githubusercontent.com/iamcal/emoji-data/master/img-twitter-64/";
 
+    public String unicodeString;
+
     private DownloadedTexture texture;
     private ResourceLocation resourceLocation;
 
@@ -34,6 +36,11 @@ public class EmojiFromTwitmoji extends Emoji {
     public ResourceLocation getResourceLocation() {
         checkLoad();
         return resourceLocation;
+    }
+
+    @Override
+    public String getInsertText() {
+        return unicodeString != null ? unicodeString : super.getInsertText();
     }
 
     public boolean isLoaded() {

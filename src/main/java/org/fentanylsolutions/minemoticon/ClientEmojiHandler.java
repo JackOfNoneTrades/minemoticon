@@ -26,12 +26,16 @@ public class ClientEmojiHandler {
     // Keyed by first char of the unicode string, values sorted longest-first
     public static final Map<Character, List<String>> UNICODE_KEYS_BY_CHAR = new HashMap<>();
     public static final Map<String, Emoji> EMOJI_UNICODE_LOOKUP = new HashMap<>();
+    public static final List<String> CATEGORIES = new ArrayList<>();
+    // Flat list: String (category name) or Emoji[] (row of up to 9)
+    public static final List<Object> PICKER_LINES = new ArrayList<>();
     public static boolean error = false;
 
     public static void setup() {
         if (EmojiConfig.enableTwemoji) {
             loadTwemojis();
         }
+        buildPickerData();
         Minemoticon.LOG.info("Loaded {} emojis", EMOJI_LIST.size());
     }
 
@@ -76,6 +80,7 @@ public class ClientEmojiHandler {
 
                 String unified = obj.get("unified")
                     .getAsString();
+                emoji.unicodeString = unifiedToString(unified);
                 registerUnicode(unified, emoji);
 
                 EMOJI_MAP.computeIfAbsent(emoji.category, k -> new ArrayList<>())
@@ -97,6 +102,23 @@ public class ClientEmojiHandler {
         } catch (Exception e) {
             error = true;
             Minemoticon.LOG.error("Failed to load twemojis", e);
+        }
+    }
+
+    private static void buildPickerData() {
+        CATEGORIES.clear();
+        PICKER_LINES.clear();
+        for (var entry : EMOJI_MAP.entrySet()) {
+            CATEGORIES.add(entry.getKey());
+            PICKER_LINES.add(entry.getKey());
+            var emojis = entry.getValue();
+            for (int i = 0; i < emojis.size(); i += 9) {
+                var row = new Emoji[9];
+                for (int j = 0; j < 9 && i + j < emojis.size(); j++) {
+                    row[j] = emojis.get(i + j);
+                }
+                PICKER_LINES.add(row);
+            }
         }
     }
 

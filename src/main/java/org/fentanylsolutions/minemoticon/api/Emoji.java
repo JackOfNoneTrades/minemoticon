@@ -74,6 +74,12 @@ public class Emoji implements Predicate<String> {
         return textRegex;
     }
 
+    // What to paste when selected from the picker.
+    // Twemoji overrides to return unicode. Server packs would return :colon: syntax.
+    public String getInsertText() {
+        return getShorterString();
+    }
+
     private static String cleanForRegex(String s) {
         return s.replaceAll("\\)", "\\\\)")
             .replaceAll("\\(", "\\\\(")
