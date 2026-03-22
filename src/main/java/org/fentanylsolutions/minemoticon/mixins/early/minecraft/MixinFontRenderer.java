@@ -10,6 +10,7 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(FontRenderer.class)
 public abstract class MixinFontRenderer {
@@ -33,10 +34,42 @@ public abstract class MixinFontRenderer {
     private float alpha;
 
     @Shadow
+    public abstract int getStringWidth(String text);
+
+    @Shadow
+    public abstract int getCharWidth(char c);
+
+    @Shadow
     protected abstract void renderStringAtPos(String text, boolean shadow);
 
     @Unique
     private boolean minemoticon$rendering = false;
+
+    @Unique
+    private boolean minemoticon$measuringWidth = false;
+
+    @Inject(method = "getStringWidth", at = @At("HEAD"), cancellable = true)
+    private void minemoticon$fixStringWidth(String text, CallbackInfoReturnable<Integer> cir) {
+        if (minemoticon$measuringWidth) return;
+
+        var segments = EmojiRenderer.parse(text);
+        if (segments == null) return;
+
+        minemoticon$measuringWidth = true;
+        try {
+            int width = 0;
+            for (var seg : segments) {
+                if (seg instanceof EmojiFromTwitmoji) {
+                    width += (int) EmojiRenderer.EMOJI_SIZE;
+                } else {
+                    width += this.getStringWidth((String) seg);
+                }
+            }
+            cir.setReturnValue(width);
+        } finally {
+            minemoticon$measuringWidth = false;
+        }
+    }
 
     @Inject(method = "renderStringAtPos", at = @At("HEAD"), cancellable = true)
     private void minemoticon$renderWithEmojis(String text, boolean shadow, CallbackInfo ci) {

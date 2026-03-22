@@ -12,7 +12,7 @@ import org.lwjgl.opengl.GL11;
 
 public class EmojiRenderer {
 
-    public static final float EMOJI_SIZE = 10.0f;
+    public static final float EMOJI_SIZE = 9.0f;
 
     // When true, parse() returns null unconditionally. Used by the picker
     // info bar to render :colon: text without the font mixin replacing it.
@@ -89,7 +89,7 @@ public class EmojiRenderer {
         // Reset color to white so the emoji texture isn't tinted
         GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
-        float top = y - 1.0f;
+        float top = y;
         GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
         GL11.glTexCoord2f(0, 0);
         GL11.glVertex3f(x, top, 0);
