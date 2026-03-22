@@ -4,13 +4,25 @@ import java.util.List;
 import java.util.Set;
 
 import org.fentanylsolutions.fentlib.core.FentEarlyMixinLoader;
+import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
+
+import com.gtnewhorizon.gtnhlib.config.ConfigException;
+import com.gtnewhorizon.gtnhlib.config.ConfigurationManager;
 
 import cpw.mods.fml.relauncher.IFMLLoadingPlugin;
 
 @SuppressWarnings("unused")
 @IFMLLoadingPlugin.MCVersion("1.7.10")
 public class EarlyMixinLoader extends FentEarlyMixinLoader {
+
+    public EarlyMixinLoader() {
+        try {
+            ConfigurationManager.registerConfig(EmojiConfig.class);
+        } catch (ConfigException e) {
+            throw new RuntimeException(e);
+        }
+    }
 
     @Override
     public String getMixinConfig() {
