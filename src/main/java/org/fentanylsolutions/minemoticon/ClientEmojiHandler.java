@@ -5,6 +5,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +22,7 @@ public class ClientEmojiHandler {
     public static final Map<String, List<Emoji>> EMOJI_MAP = new LinkedHashMap<>();
     public static final List<Emoji> EMOJI_LIST = new ArrayList<>();
     public static final List<Emoji> EMOJI_WITH_TEXTS = new ArrayList<>();
+    public static final Map<String, Emoji> EMOJI_LOOKUP = new HashMap<>();
     public static boolean error = false;
 
     public static void setup() {
@@ -63,6 +65,10 @@ public class ClientEmojiHandler {
                     obj.get("texts")
                         .getAsJsonArray()
                         .forEach(e -> emoji.texts.add(e.getAsString()));
+                }
+
+                for (String key : emoji.strings) {
+                    EMOJI_LOOKUP.put(key, emoji);
                 }
 
                 EMOJI_MAP.computeIfAbsent(emoji.category, k -> new ArrayList<>())

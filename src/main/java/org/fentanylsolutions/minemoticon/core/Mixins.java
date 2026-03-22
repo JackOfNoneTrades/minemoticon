@@ -1,6 +1,7 @@
 package org.fentanylsolutions.minemoticon.core;
 
 import org.fentanylsolutions.fentlib.core.FentMixins;
+import org.fentanylsolutions.fentlib.util.MiscUtil;
 import org.fentanylsolutions.fentlib.util.MixinUtil;
 
 public class Mixins extends FentMixins {
@@ -9,14 +10,10 @@ public class Mixins extends FentMixins {
 
     @Override
     protected void registerMixins(MixinUtil.Registry registry) {
-        // Minecraft Accessors
-        /*
-         * registry.mixin("AccessorNetworkSystem")
-         * .phase(MixinUtil.Phase.EARLY)
-         * .side(MiscUtil.Side.BOTH)
-         * .build();
-         */
-
+        registry.mixin("MixinFontRenderer")
+            .phase(MixinUtil.Phase.EARLY)
+            .side(MiscUtil.Side.CLIENT)
+            .build();
     }
 
     public static java.util.List<String> getEarlyMixinsForLoader() {
