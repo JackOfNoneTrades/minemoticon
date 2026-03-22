@@ -22,22 +22,50 @@ public class EmojiRenderer {
         List<Object> segments = null;
         int lastEnd = 0;
 
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) != ':') continue;
-            int end = text.indexOf(':', i + 1);
-            if (end == -1) continue;
-
-            String key = text.substring(i, end + 1);
-            Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
-            if (!(emoji instanceof EmojiFromTwitmoji twitmoji)) continue;
-
-            if (segments == null) segments = new ArrayList<>();
-            if (i > lastEnd) {
-                segments.add(text.substring(lastEnd, i));
+        for (int i = 0; i < text.length();) {
+            // Try :colon: syntax
+            if (text.charAt(i) == ':') {
+                int end = text.indexOf(':', i + 1);
+                if (end != -1) {
+                    String key = text.substring(i, end + 1);
+                    Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
+                    if (emoji instanceof EmojiFromTwitmoji twitmoji) {
+                        if (segments == null) segments = new ArrayList<>();
+                        if (i > lastEnd) segments.add(text.substring(lastEnd, i));
+                        segments.add(twitmoji);
+                        lastEnd = end + 1;
+                        i = lastEnd;
+                        continue;
+                    }
+                }
             }
-            segments.add(twitmoji);
-            lastEnd = end + 1;
-            i = end;
+
+            // Try Unicode emoji match
+            int matchLen = 0;
+            EmojiFromTwitmoji unicodeMatch = null;
+            var candidates = ClientEmojiHandler.UNICODE_KEYS_BY_CHAR.get(text.charAt(i));
+            if (candidates != null) {
+                for (String candidate : candidates) { // sorted longest-first
+                    if (text.startsWith(candidate, i)) {
+                        Emoji e = ClientEmojiHandler.EMOJI_UNICODE_LOOKUP.get(candidate);
+                        if (e instanceof EmojiFromTwitmoji t) {
+                            unicodeMatch = t;
+                            matchLen = candidate.length();
+                            break;
+                        }
+                    }
+                }
+            }
+            if (unicodeMatch != null) {
+                if (segments == null) segments = new ArrayList<>();
+                if (i > lastEnd) segments.add(text.substring(lastEnd, i));
+                segments.add(unicodeMatch);
+                lastEnd = i + matchLen;
+                i = lastEnd;
+                continue;
+            }
+
+            i++;
         }
 
         if (segments == null) return null;

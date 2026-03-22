@@ -23,6 +23,9 @@ public class ClientEmojiHandler {
     public static final List<Emoji> EMOJI_LIST = new ArrayList<>();
     public static final List<Emoji> EMOJI_WITH_TEXTS = new ArrayList<>();
     public static final Map<String, Emoji> EMOJI_LOOKUP = new HashMap<>();
+    // Keyed by first char of the unicode string, values sorted longest-first
+    public static final Map<Character, List<String>> UNICODE_KEYS_BY_CHAR = new HashMap<>();
+    public static final Map<String, Emoji> EMOJI_UNICODE_LOOKUP = new HashMap<>();
     public static boolean error = false;
 
     public static void setup() {
@@ -71,6 +74,10 @@ public class ClientEmojiHandler {
                     EMOJI_LOOKUP.put(key, emoji);
                 }
 
+                String unified = obj.get("unified")
+                    .getAsString();
+                registerUnicode(unified, emoji);
+
                 EMOJI_MAP.computeIfAbsent(emoji.category, k -> new ArrayList<>())
                     .add(emoji);
                 EMOJI_LIST.add(emoji);
@@ -83,10 +90,38 @@ public class ClientEmojiHandler {
             EMOJI_WITH_TEXTS.sort(Comparator.comparingInt(e -> e.sort));
             EMOJI_MAP.values()
                 .forEach(list -> list.sort(Comparator.comparingInt(e -> e.sort)));
+
+            // Sort unicode keys longest-first so we match the most specific variant
+            UNICODE_KEYS_BY_CHAR.values()
+                .forEach(list -> list.sort((a, b) -> b.length() - a.length()));
         } catch (Exception e) {
             error = true;
             Minemoticon.LOG.error("Failed to load twemojis", e);
         }
+    }
+
+    private static void registerUnicode(String unified, Emoji emoji) {
+        String str = unifiedToString(unified);
+        EMOJI_UNICODE_LOOKUP.put(str, emoji);
+        UNICODE_KEYS_BY_CHAR.computeIfAbsent(str.charAt(0), k -> new ArrayList<>())
+            .add(str);
+
+        // Also register without variation selectors so both ☃ and ☃️ work
+        String stripped = unified.replaceAll("-FE0F", "");
+        if (!stripped.equals(unified)) {
+            String strStripped = unifiedToString(stripped);
+            EMOJI_UNICODE_LOOKUP.putIfAbsent(strStripped, emoji);
+            UNICODE_KEYS_BY_CHAR.computeIfAbsent(strStripped.charAt(0), k -> new ArrayList<>())
+                .add(strStripped);
+        }
+    }
+
+    private static String unifiedToString(String unified) {
+        var sb = new StringBuilder();
+        for (String hex : unified.split("-")) {
+            sb.appendCodePoint(Integer.parseInt(hex, 16));
+        }
+        return sb.toString();
     }
 
     public static String readStringFromURL(String requestURL) {
