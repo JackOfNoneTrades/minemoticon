@@ -4,66 +4,100 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiTextField;
+import net.minecraft.client.gui.ScaledResolution;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
+import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 
 public class EmojiPickerGui {
 
-    private static final int GRID_COLS = 9;
-    private static final int VISIBLE_ROWS = 8;
-    private static final int CELL_SIZE = 12;
-    private static final int PADDING = 3;
-    private static final int SEARCH_HEIGHT = 14;
-    private static final int INFO_HEIGHT = 12;
+    // Layout
+    private static final int COLS = 9;
+    private static final int ROWS = 8;
+    private static final int CELL = 12;
+    private static final int PAD = 3;
+    private static final int GAP = 2;
+    private static final int SIDEBAR_W = 14;
+    private static final int SCROLLBAR_W = 4;
+    private static final int SEARCH_H = 14;
+    private static final int INFO_H = 14;
+    private static final float EASE = 0.2f;
+    private static final float SNAP = 0.05f;
 
-    private final GuiTextField chatInput;
     private final FontRenderer font;
     private final GuiTextField searchField;
+    private final int screenHeight;
 
     private boolean open;
-    private int scrollOffset;
-    private Emoji hoveredEmoji;
     private EmojiFromTwitmoji buttonEmoji;
+    private Emoji hoveredEmoji;
+    private String hoveredCategory;
     private List<Object> filteredLines = new ArrayList<>();
 
-    // Layout positions
+    // Scroll state
+    private int scrollOffset;
+    private float scrollSmooth;
+
+    // Sidebar state
+    private float sidebarHighlight;
+    private float sidebarScroll;
+    private float sidebarScrollTarget;
+    private boolean sidebarManual;
+
+    // Scrollbar drag
+    private boolean draggingScrollbar;
+
+    // Keyboard selection
+    private int selectedLine = -1;
+    private int selectedCol = -1;
+    private String pendingInsertText;
+
+    // Panel bounds
     private final int panelX, panelY, panelW, panelH;
     private final int buttonX, buttonY;
-    private final int gridX, gridY;
+    private final int sidebarX, sidebarY;
+    private final int gridX, gridY, gridW, gridH;
+    private final int scrollbarX;
+    private final int infoY;
 
     public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight) {
-        this.chatInput = chatInput;
         this.font = font;
+        this.screenHeight = screenHeight;
 
-        panelW = GRID_COLS * CELL_SIZE + PADDING * 2;
-        panelH = SEARCH_HEIGHT + VISIBLE_ROWS * CELL_SIZE + INFO_HEIGHT + PADDING * 3;
+        gridW = COLS * CELL;
+        gridH = ROWS * CELL;
+
+        panelW = PAD + SIDEBAR_W + GAP + gridW + GAP + SCROLLBAR_W + PAD;
+        panelH = PAD + SEARCH_H + GAP + gridH + GAP + INFO_H + PAD;
         panelX = screenWidth - panelW - 2;
         panelY = screenHeight - 14 - panelH;
 
-        gridX = panelX + PADDING;
-        gridY = panelY + PADDING + SEARCH_HEIGHT + PADDING;
+        sidebarX = panelX + PAD;
+        sidebarY = panelY + PAD + SEARCH_H + GAP;
 
-        buttonX = screenWidth - CELL_SIZE - 2;
-        buttonY = screenHeight - CELL_SIZE - 1;
+        gridX = sidebarX + SIDEBAR_W + GAP;
+        gridY = sidebarY;
 
-        // Resolve button emoji from config
+        scrollbarX = gridX + gridW + GAP;
+
+        infoY = gridY + gridH + GAP;
+
+        buttonX = screenWidth - CELL - 2;
+        buttonY = screenHeight - CELL;
+
         var lookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + EmojiConfig.pickerButtonEmoji + ":");
         if (lookup instanceof EmojiFromTwitmoji t) buttonEmoji = t;
 
-        searchField = new GuiTextField(
-            font,
-            panelX + PADDING + 2,
-            panelY + PADDING + 2,
-            panelW - PADDING * 2 - 4,
-            SEARCH_HEIGHT - 4);
+        searchField = new GuiTextField(font, panelX + PAD + 2, panelY + PAD + 2, panelW - PAD * 2 - 4, SEARCH_H - 4);
         searchField.setMaxStringLength(50);
     }
 
@@ -78,6 +112,10 @@ public class EmojiPickerGui {
             searchField.setText("");
             filteredLines.clear();
             scrollOffset = 0;
+            scrollSmooth = 0;
+            draggingScrollbar = false;
+            selectedLine = -1;
+            selectedCol = -1;
         }
     }
 
@@ -85,87 +123,303 @@ public class EmojiPickerGui {
         if (open) searchField.updateCursorCounter();
     }
 
+    // Returns and clears pending text from keyboard selection (Enter key).
+    public String consumeInsertText() {
+        var text = pendingInsertText;
+        pendingInsertText = null;
+        return text;
+    }
+
+    // -- Rendering --
+
     public void render(int mouseX, int mouseY) {
-        // Button
         if (buttonEmoji != null) {
-            EmojiRenderer.renderQuad(buttonEmoji, buttonX, buttonY);
-            GL11.glColor4f(1, 1, 1, 1);
+            renderButtonEmoji(mouseX, mouseY);
         }
 
         if (!open) return;
 
         hoveredEmoji = null;
+        hoveredCategory = null;
 
-        // Panel background
+        scrollSmooth = ease(scrollSmooth, scrollOffset);
+
+        if (draggingScrollbar) {
+            if (!Mouse.isButtonDown(0)) {
+                draggingScrollbar = false;
+            } else {
+                updateScrollFromMouseY(mouseY);
+            }
+        }
+
+        boolean searching = !searchField.getText()
+            .isEmpty();
+        if (!searching) {
+            String activeCat = getCategoryAtOffset((int) (scrollSmooth + 0.5f));
+            int activeIdx = ClientEmojiHandler.CATEGORIES.indexOf(activeCat);
+            if (activeIdx >= 0) {
+                sidebarHighlight = ease(sidebarHighlight, activeIdx);
+                if (!sidebarManual) {
+                    int sidebarCapacity = gridH / CELL;
+                    sidebarScrollTarget = activeIdx - sidebarCapacity / 2.0f + 0.5f;
+                    sidebarScrollTarget = clamp(
+                        sidebarScrollTarget,
+                        0,
+                        Math.max(0, ClientEmojiHandler.CATEGORIES.size() - sidebarCapacity));
+                }
+            }
+            sidebarScroll = ease(sidebarScroll, sidebarScrollTarget);
+        }
+
         Gui.drawRect(panelX, panelY, panelX + panelW, panelY + panelH, 0xD0000000);
 
-        // Search field
         Gui.drawRect(
-            panelX + PADDING - 1,
-            panelY + PADDING - 1,
-            panelX + panelW - PADDING + 1,
-            panelY + PADDING + SEARCH_HEIGHT - 1,
+            panelX + PAD - 1,
+            panelY + PAD - 1,
+            panelX + panelW - PAD + 1,
+            panelY + PAD + SEARCH_H - 1,
             0xFF333333);
         searchField.drawTextBox();
 
-        // Grid
-        var lines = getVisibleLines();
-        for (int row = 0; row < VISIBLE_ROWS && row < lines.size(); row++) {
-            var line = lines.get(row);
-            int y = gridY + row * CELL_SIZE;
+        if (!searching) {
+            renderSidebar(mouseX, mouseY);
+        }
+
+        renderGrid(mouseX, mouseY, searching);
+        renderScrollbar(mouseX, mouseY);
+        renderInfoBar();
+
+        // Tooltip for hovered category (rendered last, on top of everything)
+        if (hoveredCategory != null) {
+            renderTooltip(mouseX, mouseY, hoveredCategory);
+        }
+    }
+
+    private void renderSidebar(int mouseX, int mouseY) {
+        var categories = ClientEmojiHandler.CATEGORIES;
+        if (categories.isEmpty()) return;
+
+        enableScissor(sidebarX, sidebarY, SIDEBAR_W, gridH);
+
+        for (int i = 0; i < categories.size(); i++) {
+            float y = sidebarY + (i - sidebarScroll) * CELL;
+
+            // Active highlight
+            float highlightY = sidebarY + (sidebarHighlight - sidebarScroll) * CELL - 1;
+            if (i == (int) (sidebarHighlight + 0.5f)) {
+                Gui.drawRect(sidebarX, (int) highlightY, sidebarX + SIDEBAR_W, (int) highlightY + CELL, 0x40FFFFFF);
+            }
+
+            // Hover
+            if (mouseX >= sidebarX && mouseX < sidebarX + SIDEBAR_W
+                && mouseY >= (int) y - 1
+                && mouseY < (int) y + CELL - 1) {
+                Gui.drawRect(sidebarX, (int) y - 1, sidebarX + SIDEBAR_W, (int) y + CELL - 1, 0x20FFFFFF);
+                hoveredCategory = categories.get(i);
+            }
+
+            String cat = categories.get(i);
+            var emojis = ClientEmojiHandler.EMOJI_MAP.get(cat);
+            if (emojis != null && !emojis.isEmpty() && emojis.get(0) instanceof EmojiFromTwitmoji t) {
+                EmojiRenderer.renderQuad(t, sidebarX + 2, y + 1);
+            }
+        }
+        GL11.glColor4f(1, 1, 1, 1);
+
+        GL11.glDisable(GL11.GL_SCISSOR_TEST);
+    }
+
+    private void renderGrid(int mouseX, int mouseY, boolean searching) {
+        var allLines = getCurrentLines();
+        int xStart = searching ? sidebarX : gridX;
+        int areaW = searching ? (gridX - sidebarX + gridW) : gridW;
+
+        int baseRow = (int) scrollSmooth;
+        float fracPixel = (scrollSmooth - baseRow) * CELL;
+
+        enableScissor(xStart, gridY, areaW + GAP + SCROLLBAR_W, gridH);
+
+        for (int row = 0; row < ROWS + 1; row++) {
+            int lineIdx = baseRow + row;
+            if (lineIdx < 0 || lineIdx >= allLines.size()) continue;
+
+            var line = allLines.get(lineIdx);
+            float y = gridY + row * CELL - fracPixel;
 
             if (line instanceof String category) {
-                var trimmed = font.trimStringToWidth(category, panelW - PADDING * 2);
-                font.drawStringWithShadow(trimmed, gridX + 1, y + 2, 0x969696);
+                var trimmed = font.trimStringToWidth(category, areaW);
+                font.drawStringWithShadow(trimmed, xStart + 1, (int) y + 2, 0x969696);
             } else if (line instanceof Emoji[]emojis) {
-                for (int col = 0; col < GRID_COLS; col++) {
+                for (int col = 0; col < COLS; col++) {
                     if (emojis[col] == null) continue;
-                    int x = gridX + col * CELL_SIZE;
+                    int x = xStart + col * CELL;
+                    int cellTop = (int) y - 1;
 
-                    if (mouseX >= x && mouseX < x + CELL_SIZE && mouseY >= y && mouseY < y + CELL_SIZE) {
-                        Gui.drawRect(x, y, x + CELL_SIZE, y + CELL_SIZE, 0x40FFFFFF);
+                    // Keyboard selection highlight
+                    boolean isSelected = lineIdx == selectedLine && col == selectedCol;
+                    if (isSelected) {
+                        Gui.drawRect(x, cellTop, x + CELL, cellTop + CELL, 0x60FFFFFF);
+                        hoveredEmoji = emojis[col];
+                    }
+
+                    // Mouse hover highlight
+                    if (mouseX >= x && mouseX < x + CELL
+                        && mouseY >= Math.max(cellTop, gridY)
+                        && mouseY < Math.min(cellTop + CELL, gridY + gridH)) {
+                        if (!isSelected) {
+                            Gui.drawRect(x, cellTop, x + CELL, cellTop + CELL, 0x40FFFFFF);
+                        }
                         hoveredEmoji = emojis[col];
                     }
 
                     if (emojis[col] instanceof EmojiFromTwitmoji t) {
-                        EmojiRenderer.renderQuad(t, x + 1, y + 1);
+                        EmojiRenderer.renderQuad(t, x + 1, cellTop + 2);
                     }
                 }
                 GL11.glColor4f(1, 1, 1, 1);
             }
         }
 
-        // Info area
-        int infoY = panelY + panelH - INFO_HEIGHT;
-        Gui.drawRect(panelX, infoY, panelX + panelW, panelY + panelH, 0x80000000);
-        if (hoveredEmoji != null) {
-            var name = hoveredEmoji.getShorterString();
-            font.drawStringWithShadow(name, panelX + PADDING, infoY + 2, 0xCCCCCC);
-        }
+        GL11.glDisable(GL11.GL_SCISSOR_TEST);
     }
 
-    // Returns the emoji insert text if one was clicked, null otherwise.
+    private void renderScrollbar(int mouseX, int mouseY) {
+        var allLines = getCurrentLines();
+        int total = allLines.size();
+        if (total <= ROWS) return;
+
+        Gui.drawRect(scrollbarX, gridY, scrollbarX + SCROLLBAR_W, gridY + gridH, 0x20FFFFFF);
+
+        float viewRatio = (float) ROWS / total;
+        int thumbH = Math.max(8, (int) (gridH * viewRatio));
+        float scrollRatio = scrollSmooth / (total - ROWS);
+        scrollRatio = clamp(scrollRatio, 0, 1);
+        int thumbY = gridY + (int) ((gridH - thumbH) * scrollRatio);
+
+        boolean hovered = mouseX >= scrollbarX - 2 && mouseX < scrollbarX + SCROLLBAR_W + 2
+            && mouseY >= gridY
+            && mouseY < gridY + gridH;
+        int thumbColor = draggingScrollbar ? 0xC0FFFFFF : (hovered ? 0xA0FFFFFF : 0x60FFFFFF);
+        Gui.drawRect(scrollbarX, thumbY, scrollbarX + SCROLLBAR_W, thumbY + thumbH, thumbColor);
+    }
+
+    private void renderInfoBar() {
+        Gui.drawRect(panelX, infoY, panelX + panelW, infoY + INFO_H, 0x80000000);
+        if (hoveredEmoji == null) return;
+
+        if (hoveredEmoji instanceof EmojiFromTwitmoji t) {
+            EmojiRenderer.renderQuad(t, panelX + PAD + 1, infoY + 2);
+            GL11.glColor4f(1, 1, 1, 1);
+        }
+
+        EmojiRenderer.bypass = true;
+        int nameX = panelX + PAD + CELL + 3;
+        int maxNameW = panelX + panelW - PAD - nameX;
+        String name = hoveredEmoji.getShorterString();
+        if (font.getStringWidth(name) > maxNameW) {
+            name = font.trimStringToWidth(name, maxNameW - font.getStringWidth("...")) + "...";
+        }
+        font.drawStringWithShadow(name, nameX, infoY + 3, 0xCCCCCC);
+        EmojiRenderer.bypass = false;
+    }
+
+    private void renderTooltip(int mouseX, int mouseY, String text) {
+        int textW = font.getStringWidth(text);
+        int tipX = sidebarX + SIDEBAR_W + 2;
+        int tipY = mouseY - 4;
+        Gui.drawRect(tipX - 2, tipY - 2, tipX + textW + 2, tipY + 12, 0xE0000000);
+        Gui.drawRect(tipX - 2, tipY - 2, tipX + textW + 2, tipY - 1, 0x505050FF);
+        font.drawStringWithShadow(text, tipX, tipY, 0xFFFFFF);
+    }
+
+    private void renderButtonEmoji(int mouseX, int mouseY) {
+        var texLoc = buttonEmoji.getResourceLocation();
+        Minecraft.getMinecraft()
+            .getTextureManager()
+            .bindTexture(texLoc);
+
+        boolean hovered = mouseX >= buttonX && mouseX < buttonX + CELL && mouseY >= buttonY && mouseY < buttonY + CELL;
+        float brightness = hovered || open ? 0.9f : 0.6f;
+        GL11.glColor4f(brightness, brightness, brightness, 1.0f);
+
+        float size = EmojiRenderer.EMOJI_SIZE;
+        float top = buttonY - 1.0f;
+        GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
+        GL11.glTexCoord2f(0, 0);
+        GL11.glVertex3f(buttonX, top, 0);
+        GL11.glTexCoord2f(0, 1);
+        GL11.glVertex3f(buttonX, top + size, 0);
+        GL11.glTexCoord2f(1, 0);
+        GL11.glVertex3f(buttonX + size, top, 0);
+        GL11.glTexCoord2f(1, 1);
+        GL11.glVertex3f(buttonX + size, top + size, 0);
+        GL11.glEnd();
+
+        GL11.glColor4f(1, 1, 1, 1);
+    }
+
+    private void enableScissor(int x, int y, int w, int h) {
+        var mc = Minecraft.getMinecraft();
+        var sr = new ScaledResolution(mc, mc.displayWidth, mc.displayHeight);
+        int scale = sr.getScaleFactor();
+        GL11.glEnable(GL11.GL_SCISSOR_TEST);
+        GL11.glScissor(x * scale, (screenHeight - y - h) * scale, w * scale, h * scale);
+    }
+
+    // -- Input --
+
     public String mouseClicked(int mouseX, int mouseY, int button) {
-        // Toggle button
-        if (mouseX >= buttonX && mouseX < buttonX + CELL_SIZE && mouseY >= buttonY && mouseY < buttonY + CELL_SIZE) {
+        if (mouseX >= buttonX && mouseX < buttonX + CELL && mouseY >= buttonY && mouseY < buttonY + CELL) {
             toggle();
             return null;
         }
 
         if (!open) return null;
 
-        // Search field focus
         searchField.mouseClicked(mouseX, mouseY, button);
 
-        // Emoji grid click
-        if (mouseX >= gridX && mouseX < gridX + GRID_COLS * CELL_SIZE
+        if (mouseX >= scrollbarX - 2 && mouseX < scrollbarX + SCROLLBAR_W + 2
             && mouseY >= gridY
-            && mouseY < gridY + VISIBLE_ROWS * CELL_SIZE) {
-            var lines = getVisibleLines();
-            int row = (mouseY - gridY) / CELL_SIZE;
-            int col = (mouseX - gridX) / CELL_SIZE;
-            if (row < lines.size() && lines.get(row) instanceof Emoji[]emojis) {
-                if (col < GRID_COLS && emojis[col] != null) {
+            && mouseY < gridY + gridH) {
+            draggingScrollbar = true;
+            updateScrollFromMouseY(mouseY);
+            return null;
+        }
+
+        boolean searching = !searchField.getText()
+            .isEmpty();
+
+        if (!searching && mouseX >= sidebarX
+            && mouseX < sidebarX + SIDEBAR_W
+            && mouseY >= sidebarY
+            && mouseY < sidebarY + gridH) {
+            var categories = ClientEmojiHandler.CATEGORIES;
+            int idx = (int) ((mouseY - sidebarY) / CELL + sidebarScroll);
+            if (idx >= 0 && idx < categories.size()) {
+                var lineIdx = ClientEmojiHandler.CATEGORY_LINE_INDEX.get(categories.get(idx));
+                if (lineIdx != null) {
+                    scrollOffset = lineIdx;
+                    clampScroll();
+                }
+            }
+            return null;
+        }
+
+        int xStart = searching ? sidebarX : gridX;
+        if (mouseX >= xStart && mouseX < xStart + COLS * CELL && mouseY >= gridY && mouseY < gridY + gridH) {
+            var allLines = getCurrentLines();
+            int baseRow = (int) scrollSmooth;
+            float fracPixel = (scrollSmooth - baseRow) * CELL;
+
+            for (int row = 0; row < ROWS + 1; row++) {
+                int lineIdx = baseRow + row;
+                if (lineIdx < 0 || lineIdx >= allLines.size()) continue;
+                float y = gridY + row * CELL - fracPixel;
+                if (mouseY < y - 1 || mouseY >= y + CELL - 1) continue;
+                if (!(allLines.get(lineIdx) instanceof Emoji[]emojis)) continue;
+
+                int col = (mouseX - xStart) / CELL;
+                if (col >= 0 && col < COLS && emojis[col] != null) {
                     String text = emojis[col].getInsertText();
                     if (EmojiConfig.closePickerOnSelect) toggle();
                     return text;
@@ -176,22 +430,45 @@ public class EmojiPickerGui {
         return null;
     }
 
-    // Returns true if the click was inside the panel (should be consumed).
     public boolean isInsidePanel(int mouseX, int mouseY) {
-        if (mouseX >= buttonX && mouseX < buttonX + CELL_SIZE && mouseY >= buttonY && mouseY < buttonY + CELL_SIZE)
-            return true;
+        if (mouseX >= buttonX && mouseX < buttonX + CELL && mouseY >= buttonY && mouseY < buttonY + CELL) return true;
         if (!open) return false;
         return mouseX >= panelX && mouseX < panelX + panelW && mouseY >= panelY && mouseY < panelY + panelH;
     }
 
     public boolean keyTyped(char c, int keyCode) {
         if (!open) return false;
-        if (keyCode == 1) { // ESC
+        if (keyCode == 1) {
             toggle();
             return true;
         }
+
+        // Arrow key navigation
+        switch (keyCode) {
+            case 200:
+                moveSelectionVertical(-1);
+                return true;
+            case 208:
+                moveSelectionVertical(1);
+                return true;
+            case 203:
+                moveSelectionHorizontal(-1);
+                return true;
+            case 205:
+                moveSelectionHorizontal(1);
+                return true;
+            case 28:
+            case 156: // Enter
+                if (trySelectCurrent()) return true;
+                return false; // no selection -- let Enter send the chat message
+        }
+
         if (searchField.textboxKeyTyped(c, keyCode)) {
             updateFilter();
+            scrollOffset = 0;
+            scrollSmooth = 0;
+            selectedLine = -1;
+            selectedCol = -1;
             return true;
         }
         return false;
@@ -201,18 +478,124 @@ public class EmojiPickerGui {
         if (!open) return false;
         if (mouseX < panelX || mouseX >= panelX + panelW || mouseY < panelY || mouseY >= panelY + panelH) return false;
 
+        if (mouseX >= sidebarX && mouseX < sidebarX + SIDEBAR_W
+            && mouseY >= sidebarY
+            && mouseY < sidebarY + gridH
+            && searchField.getText()
+                .isEmpty()) {
+            sidebarManual = true;
+            sidebarScrollTarget -= delta;
+            int sidebarCapacity = gridH / CELL;
+            sidebarScrollTarget = clamp(
+                sidebarScrollTarget,
+                0,
+                Math.max(0, ClientEmojiHandler.CATEGORIES.size() - sidebarCapacity));
+            return true;
+        }
+
+        sidebarManual = false;
         scrollOffset -= delta;
-        var allLines = getCurrentLines();
-        int maxScroll = Math.max(0, allLines.size() - VISIBLE_ROWS);
-        scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
+        clampScroll();
         return true;
+    }
+
+    // -- Selection --
+
+    private boolean trySelectCurrent() {
+        var lines = getCurrentLines();
+        if (selectedLine < 0 || selectedLine >= lines.size()) return false;
+        if (!(lines.get(selectedLine) instanceof Emoji[]emojis)) return false;
+        if (selectedCol < 0 || selectedCol >= COLS || emojis[selectedCol] == null) return false;
+        pendingInsertText = emojis[selectedCol].getInsertText();
+        if (EmojiConfig.closePickerOnSelect) toggle();
+        return true;
+    }
+
+    private void moveSelectionVertical(int dir) {
+        var lines = getCurrentLines();
+        if (lines.isEmpty()) return;
+
+        int start = selectedLine < 0 ? (dir > 0 ? -1 : lines.size()) : selectedLine;
+        for (int i = start + dir; i >= 0 && i < lines.size(); i += dir) {
+            if (lines.get(i) instanceof Emoji[]emojis) {
+                selectedLine = i;
+                selectedCol = clampCol(emojis, Math.max(selectedCol, 0));
+                ensureSelectionVisible();
+                return;
+            }
+        }
+    }
+
+    private void moveSelectionHorizontal(int dir) {
+        var lines = getCurrentLines();
+        if (selectedLine < 0) {
+            moveSelectionVertical(1);
+            return;
+        }
+        if (!(lines.get(selectedLine) instanceof Emoji[]emojis)) return;
+
+        int col = selectedCol + dir;
+        // Skip nulls
+        while (col >= 0 && col < COLS && emojis[col] == null) col += dir;
+
+        if (col >= 0 && col < COLS) {
+            selectedCol = col;
+        } else {
+            // Wrap to adjacent row
+            int prevCol = selectedCol;
+            moveSelectionVertical(dir > 0 ? 1 : -1);
+            if (selectedLine >= 0 && lines.get(selectedLine) instanceof Emoji[]row) {
+                if (dir > 0) {
+                    selectedCol = 0;
+                    while (selectedCol < COLS && row[selectedCol] == null) selectedCol++;
+                } else {
+                    selectedCol = COLS - 1;
+                    while (selectedCol >= 0 && row[selectedCol] == null) selectedCol--;
+                }
+                if (selectedCol < 0 || selectedCol >= COLS) selectedCol = prevCol;
+            }
+        }
+    }
+
+    private int clampCol(Emoji[] emojis, int col) {
+        col = Math.max(0, Math.min(col, COLS - 1));
+        if (emojis[col] != null) return col;
+        for (int d = 1; d < COLS; d++) {
+            if (col - d >= 0 && emojis[col - d] != null) return col - d;
+            if (col + d < COLS && emojis[col + d] != null) return col + d;
+        }
+        return 0;
+    }
+
+    private void ensureSelectionVisible() {
+        if (selectedLine < scrollOffset) {
+            scrollOffset = selectedLine;
+        } else if (selectedLine >= scrollOffset + ROWS) {
+            scrollOffset = selectedLine - ROWS + 1;
+        }
+        clampScroll();
+    }
+
+    // -- Helpers --
+
+    private void updateScrollFromMouseY(int mouseY) {
+        float ratio = (float) (mouseY - gridY) / gridH;
+        ratio = clamp(ratio, 0, 1);
+        var allLines = getCurrentLines();
+        int maxScroll = Math.max(0, allLines.size() - ROWS);
+        scrollOffset = (int) (ratio * maxScroll);
+    }
+
+    private void clampScroll() {
+        var allLines = getCurrentLines();
+        int maxScroll = Math.max(0, allLines.size() - ROWS);
+        scrollOffset = Math.max(0, Math.min(scrollOffset, maxScroll));
     }
 
     private void updateFilter() {
         String query = searchField.getText()
             .toLowerCase();
         filteredLines.clear();
-        scrollOffset = 0;
         if (query.isEmpty()) return;
 
         var matching = ClientEmojiHandler.EMOJI_LIST.stream()
@@ -223,13 +606,22 @@ public class EmojiPickerGui {
                             .contains(query)))
             .collect(Collectors.toList());
 
-        for (int i = 0; i < matching.size(); i += GRID_COLS) {
-            var row = new Emoji[GRID_COLS];
-            for (int j = 0; j < GRID_COLS && i + j < matching.size(); j++) {
+        for (int i = 0; i < matching.size(); i += COLS) {
+            var row = new Emoji[COLS];
+            for (int j = 0; j < COLS && i + j < matching.size(); j++) {
                 row[j] = matching.get(i + j);
             }
             filteredLines.add(row);
         }
+    }
+
+    private String getCategoryAtOffset(int offset) {
+        var lines = ClientEmojiHandler.PICKER_LINES;
+        for (int i = Math.min(offset, lines.size() - 1); i >= 0; i--) {
+            if (lines.get(i) instanceof String s) return s;
+        }
+        var cats = ClientEmojiHandler.CATEGORIES;
+        return cats.isEmpty() ? null : cats.get(0);
     }
 
     private List<Object> getCurrentLines() {
@@ -237,11 +629,13 @@ public class EmojiPickerGui {
             .isEmpty() ? ClientEmojiHandler.PICKER_LINES : filteredLines;
     }
 
-    private List<Object> getVisibleLines() {
-        var all = getCurrentLines();
-        int start = Math.max(0, Math.min(scrollOffset, Math.max(0, all.size() - VISIBLE_ROWS)));
-        int end = Math.min(start + VISIBLE_ROWS, all.size());
-        if (start >= end) return new ArrayList<>();
-        return all.subList(start, end);
+    private static float ease(float current, float target) {
+        current += (target - current) * EASE;
+        if (Math.abs(current - target) < SNAP) current = target;
+        return current;
+    }
+
+    private static float clamp(float v, float min, float max) {
+        return Math.max(min, Math.min(max, v));
     }
 }

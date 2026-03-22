@@ -40,19 +40,23 @@ public abstract class MixinGuiChat extends GuiScreen {
 
         String insertText = minemoticon$picker.mouseClicked(mouseX, mouseY, button);
         if (insertText != null) {
-            inputField.writeText(insertText);
+            inputField.writeText(insertText + " ");
             ci.cancel();
             return;
         }
 
         if (minemoticon$picker.isInsidePanel(mouseX, mouseY)) {
             ci.cancel();
+        } else if (minemoticon$picker.isOpen()) {
+            minemoticon$picker.toggle();
         }
     }
 
     @Inject(method = "keyTyped", at = @At("HEAD"), cancellable = true)
     private void minemoticon$keyTyped(char c, int keyCode, CallbackInfo ci) {
         if (minemoticon$picker != null && minemoticon$picker.keyTyped(c, keyCode)) {
+            String text = minemoticon$picker.consumeInsertText();
+            if (text != null) inputField.writeText(text + " ");
             ci.cancel();
         }
     }

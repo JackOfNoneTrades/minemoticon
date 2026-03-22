@@ -29,6 +29,12 @@ public class ClientEmojiHandler {
     public static final List<String> CATEGORIES = new ArrayList<>();
     // Flat list: String (category name) or Emoji[] (row of up to 9)
     public static final List<Object> PICKER_LINES = new ArrayList<>();
+    // Maps category name to its line index in PICKER_LINES
+    public static final Map<String, Integer> CATEGORY_LINE_INDEX = new LinkedHashMap<>();
+
+    // Standard category order matching most chat platforms
+    private static final String[] CATEGORY_ORDER = { "Smileys & Emotion", "People & Body", "Animals & Nature",
+        "Food & Drink", "Travel & Places", "Activities", "Objects", "Symbols", "Flags" };
     public static boolean error = false;
 
     public static void setup() {
@@ -48,6 +54,10 @@ public class ClientEmojiHandler {
                 var obj = element.getAsJsonObject();
                 if (!obj.get("has_img_twitter")
                     .getAsBoolean()) continue;
+                if ("Component".equals(
+                    obj.get("category")
+                        .getAsString()))
+                    continue;
 
                 var emoji = new EmojiFromTwitmoji();
                 emoji.name = obj.get("short_name")
@@ -108,17 +118,39 @@ public class ClientEmojiHandler {
     private static void buildPickerData() {
         CATEGORIES.clear();
         PICKER_LINES.clear();
+        CATEGORY_LINE_INDEX.clear();
+
+        // Server/custom categories first (anything not in the standard list)
         for (var entry : EMOJI_MAP.entrySet()) {
-            CATEGORIES.add(entry.getKey());
-            PICKER_LINES.add(entry.getKey());
-            var emojis = entry.getValue();
-            for (int i = 0; i < emojis.size(); i += 9) {
-                var row = new Emoji[9];
-                for (int j = 0; j < 9 && i + j < emojis.size(); j++) {
-                    row[j] = emojis.get(i + j);
-                }
-                PICKER_LINES.add(row);
+            if (!isStandardCategory(entry.getKey())) {
+                addCategory(entry.getKey(), entry.getValue());
             }
+        }
+        // Then standard categories in platform-standard order
+        for (String cat : CATEGORY_ORDER) {
+            if (EMOJI_MAP.containsKey(cat)) {
+                addCategory(cat, EMOJI_MAP.get(cat));
+            }
+        }
+    }
+
+    private static boolean isStandardCategory(String name) {
+        for (String cat : CATEGORY_ORDER) {
+            if (cat.equals(name)) return true;
+        }
+        return false;
+    }
+
+    private static void addCategory(String name, List<Emoji> emojis) {
+        CATEGORIES.add(name);
+        CATEGORY_LINE_INDEX.put(name, PICKER_LINES.size());
+        PICKER_LINES.add(name);
+        for (int i = 0; i < emojis.size(); i += 9) {
+            var row = new Emoji[9];
+            for (int j = 0; j < 9 && i + j < emojis.size(); j++) {
+                row[j] = emojis.get(i + j);
+            }
+            PICKER_LINES.add(row);
         }
     }
 

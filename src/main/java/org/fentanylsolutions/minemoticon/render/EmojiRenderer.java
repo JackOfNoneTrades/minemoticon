@@ -14,10 +14,14 @@ public class EmojiRenderer {
 
     public static final float EMOJI_SIZE = 10.0f;
 
+    // When true, parse() returns null unconditionally. Used by the picker
+    // info bar to render :colon: text without the font mixin replacing it.
+    public static boolean bypass = false;
+
     // Returns null if no emojis found. Otherwise returns a list where each
     // element is either a String (text) or an EmojiFromTwitmoji.
     public static List<Object> parse(String text) {
-        if (ClientEmojiHandler.EMOJI_LOOKUP.isEmpty()) return null;
+        if (bypass || ClientEmojiHandler.EMOJI_LOOKUP.isEmpty()) return null;
 
         List<Object> segments = null;
         int lastEnd = 0;
