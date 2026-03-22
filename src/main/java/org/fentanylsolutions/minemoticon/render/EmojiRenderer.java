@@ -85,15 +85,16 @@ public class EmojiRenderer {
         // Reset color to white so the emoji texture isn't tinted
         GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
+        float top = y - 1.0f;
         GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
         GL11.glTexCoord2f(0, 0);
-        GL11.glVertex3f(x, y, 0);
+        GL11.glVertex3f(x, top, 0);
         GL11.glTexCoord2f(0, 1);
-        GL11.glVertex3f(x, y + EMOJI_SIZE, 0);
+        GL11.glVertex3f(x, top + EMOJI_SIZE, 0);
         GL11.glTexCoord2f(1, 0);
-        GL11.glVertex3f(x + EMOJI_SIZE, y, 0);
+        GL11.glVertex3f(x + EMOJI_SIZE, top, 0);
         GL11.glTexCoord2f(1, 1);
-        GL11.glVertex3f(x + EMOJI_SIZE, y + EMOJI_SIZE, 0);
+        GL11.glVertex3f(x + EMOJI_SIZE, top + EMOJI_SIZE, 0);
         GL11.glEnd();
     }
 }
