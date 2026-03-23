@@ -6,6 +6,7 @@ import java.util.Set;
 import org.fentanylsolutions.fentlib.core.FentEarlyMixinLoader;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
+import org.fentanylsolutions.minemoticon.ServerConfig;
 
 import com.gtnewhorizon.gtnhlib.config.ConfigException;
 import com.gtnewhorizon.gtnhlib.config.ConfigurationManager;
@@ -19,6 +20,7 @@ public class EarlyMixinLoader extends FentEarlyMixinLoader {
     public EarlyMixinLoader() {
         try {
             ConfigurationManager.registerConfig(EmojiConfig.class);
+            ConfigurationManager.registerConfig(ServerConfig.class);
         } catch (ConfigException e) {
             throw new RuntimeException(e);
         }

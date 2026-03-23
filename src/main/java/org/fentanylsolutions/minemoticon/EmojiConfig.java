@@ -22,4 +22,12 @@ public class EmojiConfig {
     @Config.Comment("Close the picker after selecting an emoji")
     @Config.DefaultBoolean(true)
     public static boolean closePickerOnSelect;
+
+    @Config.Comment("Render custom emotes sent by other players")
+    @Config.DefaultBoolean(true)
+    public static boolean receiveClientEmotes;
+
+    @Config.Comment("Enable debug logging")
+    @Config.DefaultBoolean(false)
+    public static boolean debugMode;
 }

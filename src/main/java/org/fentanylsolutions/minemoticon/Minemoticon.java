@@ -23,32 +23,40 @@ public class Minemoticon {
     public static final String MODID = "minemoticon";
     public static final Logger LOG = LogManager.getLogger(MODID);
 
+    private static boolean DEBUG_MODE;
+
     @SidedProxy(
         clientSide = MODGROUP + "." + MODID + ".ClientProxy",
         serverSide = MODGROUP + "." + MODID + ".CommonProxy")
     public static CommonProxy proxy;
 
+    public static boolean isDebugMode() {
+        return DEBUG_MODE || EmojiConfig.debugMode;
+    }
+
+    public static void debug(String message, Object... args) {
+        if (isDebugMode()) {
+            LOG.info("[DEBUG] " + message, args);
+        }
+    }
+
     @Mod.EventHandler
-    // preInit "Run before anything else. Read your config, create blocks, items, etc, and register them with the
-    // GameRegistry." (Remove if not needed)
     public void preInit(FMLPreInitializationEvent event) {
+        DEBUG_MODE = System.getenv("MCMODDING_DEBUG_MODE") != null;
         proxy.preInit(event);
     }
 
     @Mod.EventHandler
-    // load "Do your mod setup. Build whatever data structures you care about. Register recipes." (Remove if not needed)
     public void init(FMLInitializationEvent event) {
         proxy.init(event);
     }
 
     @Mod.EventHandler
-    // postInit "Handle interaction with other mods, complete your setup based on this." (Remove if not needed)
     public void postInit(FMLPostInitializationEvent event) {
         proxy.postInit(event);
     }
 
     @Mod.EventHandler
-    // register server commands in this event handler (Remove if not needed)
     public void serverStarting(FMLServerStartingEvent event) {
         proxy.serverStarting(event);
     }
