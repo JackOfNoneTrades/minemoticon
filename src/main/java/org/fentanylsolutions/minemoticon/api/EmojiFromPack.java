@@ -43,6 +43,10 @@ public class EmojiFromPack extends Emoji implements RenderableEmoji {
         return texture != null && texture.isUploaded();
     }
 
+    public File getImageFile() {
+        return imageFile;
+    }
+
     public void destroy() {
         if (resourceLocation != null) {
             Minecraft.getMinecraft()

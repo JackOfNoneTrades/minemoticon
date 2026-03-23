@@ -1,5 +1,7 @@
 package org.fentanylsolutions.minemoticon;
 
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
+
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
@@ -20,5 +22,6 @@ public class ClientProxy extends CommonProxy {
     public void onClientConnected(FMLNetworkEvent.ClientConnectedToServerEvent event) {
         Minemoticon.debug("Connected to server, resetting server capabilities");
         ServerCapabilities.reset();
+        EmoteClientHandler.reset();
     }
 }

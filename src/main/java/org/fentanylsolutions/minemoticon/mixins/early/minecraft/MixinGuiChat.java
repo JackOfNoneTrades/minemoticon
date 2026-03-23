@@ -7,6 +7,7 @@ import net.minecraft.client.gui.GuiTextField;
 import org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfig;
 import org.fentanylsolutions.minemoticon.gui.EmojiPickerGui;
 import org.fentanylsolutions.minemoticon.gui.EmojiSuggestionHelper;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.lwjgl.input.Mouse;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -100,6 +101,12 @@ public abstract class MixinGuiChat extends GuiScreen {
             inputField.setFocused(true);
             ci.cancel();
         }
+    }
+
+    // Intercept outgoing chat to announce pack emojis to the server
+    @Inject(method = "func_146403_a", at = @At("HEAD"))
+    private void minemoticon$onSendChat(String message, CallbackInfo ci) {
+        EmoteClientHandler.announceEmotesInMessage(message);
     }
 
     @Inject(method = "handleMouseInput", at = @At("HEAD"), cancellable = true)

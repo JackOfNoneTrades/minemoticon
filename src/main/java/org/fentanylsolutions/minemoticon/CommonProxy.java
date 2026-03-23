@@ -2,6 +2,7 @@ package org.fentanylsolutions.minemoticon;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 
+import org.fentanylsolutions.minemoticon.network.EmoteServerHandler;
 import org.fentanylsolutions.minemoticon.network.NetworkHandler;
 import org.fentanylsolutions.minemoticon.network.PacketServerPresence;
 
@@ -35,6 +36,13 @@ public class CommonProxy {
         if (event.player instanceof EntityPlayerMP player) {
             Minemoticon.debug("Sending presence packet to {}", player.getCommandSenderName());
             NetworkHandler.INSTANCE.sendTo(new PacketServerPresence(), player);
+        }
+    }
+
+    @SubscribeEvent
+    public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.player instanceof EntityPlayerMP player) {
+            EmoteServerHandler.onPlayerDisconnect(player);
         }
     }
 }
