@@ -61,6 +61,10 @@ public class EmojiPickerGui {
     private int selectedCol = -1;
     private String pendingInsertText;
 
+    // Config gear
+    private EmojiFromTwitmoji gearEmoji;
+    private boolean openConfig;
+
     // Panel bounds
     private final int panelX, panelY, panelW, panelH;
     private final int buttonX, buttonY;
@@ -68,6 +72,7 @@ public class EmojiPickerGui {
     private final int gridX, gridY, gridW, gridH;
     private final int scrollbarX;
     private final int infoY;
+    private final int gearX, gearY;
 
     public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight) {
         this.font = font;
@@ -97,7 +102,18 @@ public class EmojiPickerGui {
         var lookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + EmojiConfig.pickerButtonEmoji + ":");
         if (lookup instanceof EmojiFromTwitmoji t) buttonEmoji = t;
 
-        searchField = new GuiTextField(font, panelX + PAD + 2, panelY + PAD + 2, panelW - PAD * 2 - 4, SEARCH_H - 4);
+        var gearLookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":gear:");
+        if (gearLookup instanceof EmojiFromTwitmoji t) gearEmoji = t;
+
+        gearX = panelX + panelW - PAD - CELL;
+        gearY = panelY + PAD;
+
+        searchField = new GuiTextField(
+            font,
+            panelX + PAD + 2,
+            panelY + PAD + 2,
+            panelW - PAD * 2 - CELL - GAP - 4,
+            SEARCH_H - 4);
         searchField.setMaxStringLength(50);
     }
 
@@ -128,6 +144,14 @@ public class EmojiPickerGui {
         var text = pendingInsertText;
         pendingInsertText = null;
         return text;
+    }
+
+    public boolean shouldOpenConfig() {
+        if (openConfig) {
+            openConfig = false;
+            return true;
+        }
+        return false;
     }
 
     // -- Rendering --
@@ -176,10 +200,50 @@ public class EmojiPickerGui {
         Gui.drawRect(
             panelX + PAD - 1,
             panelY + PAD - 1,
-            panelX + panelW - PAD + 1,
+            panelX + panelW - PAD - CELL - GAP,
             panelY + PAD + SEARCH_H - 1,
             0xFF333333);
         searchField.drawTextBox();
+
+        // Gear button with light gray border matching GuiTextField style
+        // Match the search field's visual box: outer at (x-1,y-1,x+w+1,y+h+1), inner at (x,y,x+w,y+h)
+        if (gearEmoji != null) {
+            int gfy = panelY + PAD + 2;
+            int gfs = SEARCH_H - 4; // square size (10px), matches search field height
+            int gfx = gearX + (CELL - gfs) / 2; // center horizontally in the allocated space
+            boolean gearHovered = mouseX >= gfx - 1 && mouseX < gfx + gfs + 1
+                && mouseY >= gfy - 1
+                && mouseY < gfy + gfs + 1;
+            Gui.drawRect(gfx - 1, gfy - 1, gfx + gfs + 1, gfy + gfs + 1, 0xFFA0A0A0);
+            Gui.drawRect(gfx, gfy, gfx + gfs, gfy + gfs, 0xFF000000);
+            if (gearHovered) {
+                Gui.drawRect(gfx, gfy, gfx + gfs, gfy + gfs, 0x40FFFFFF);
+            }
+            var texLoc = gearEmoji.getResourceLocation();
+            Minecraft.getMinecraft()
+                .getTextureManager()
+                .bindTexture(texLoc);
+            float brightness = gearHovered ? 0.9f : 0.6f;
+            GL11.glColor4f(brightness, brightness, brightness, 1.0f);
+            float size = gfs - 3; // smaller gear inside the box
+            float ex = gfx + (gfs - size) / 2.0f;
+            float ey = gfy + (gfs - size) / 2.0f;
+            GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
+            GL11.glTexCoord2f(0, 0);
+            GL11.glVertex3f(ex, ey, 0);
+            GL11.glTexCoord2f(0, 1);
+            GL11.glVertex3f(ex, ey + size, 0);
+            GL11.glTexCoord2f(1, 0);
+            GL11.glVertex3f(ex + size, ey, 0);
+            GL11.glTexCoord2f(1, 1);
+            GL11.glVertex3f(ex + size, ey + size, 0);
+            GL11.glEnd();
+            GL11.glColor4f(1, 1, 1, 1);
+
+            if (gearHovered) {
+                hoveredCategory = "Config";
+            }
+        }
 
         if (!searching) {
             renderSidebar(mouseX, mouseY);
@@ -325,7 +389,11 @@ public class EmojiPickerGui {
 
     private void renderTooltip(int mouseX, int mouseY, String text) {
         int textW = font.getStringWidth(text);
-        int tipX = sidebarX + SIDEBAR_W + 2;
+        // Position to the right of the cursor, clamped to panel bounds
+        int tipX = mouseX + 12;
+        if (tipX + textW + 2 > panelX + panelW) {
+            tipX = mouseX - textW - 8;
+        }
         int tipY = mouseY - 4;
         Gui.drawRect(tipX - 2, tipY - 2, tipX + textW + 2, tipY + 12, 0xE0000000);
         Gui.drawRect(tipX - 2, tipY - 2, tipX + textW + 2, tipY - 1, 0x505050FF);
@@ -377,6 +445,16 @@ public class EmojiPickerGui {
         if (!open) return null;
 
         searchField.mouseClicked(mouseX, mouseY, button);
+
+        // Gear button
+        int gfy = panelY + PAD + 2;
+        int gfs = SEARCH_H - 4;
+        int gfx = gearX + (CELL - gfs) / 2;
+        if (mouseX >= gfx - 1 && mouseX < gfx + gfs + 1 && mouseY >= gfy - 1 && mouseY < gfy + gfs + 1) {
+            openConfig = true;
+            toggle();
+            return null;
+        }
 
         if (mouseX >= scrollbarX - 2 && mouseX < scrollbarX + SCROLLBAR_W + 2
             && mouseY >= gridY

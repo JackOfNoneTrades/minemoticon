@@ -15,7 +15,8 @@ import cpw.mods.fml.common.event.FMLServerStartingEvent;
     version = Tags.VERSION,
     name = "Minemoticon",
     acceptedMinecraftVersions = "[1.7.10]",
-    acceptableRemoteVersions = "*")
+    acceptableRemoteVersions = "*",
+    guiFactory = "org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfigFactory")
 public class Minemoticon {
 
     public static final String MODGROUP = "org.fentanylsolutions";

@@ -4,6 +4,7 @@ import net.minecraft.client.gui.GuiChat;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.GuiTextField;
 
+import org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfig;
 import org.fentanylsolutions.minemoticon.gui.EmojiPickerGui;
 import org.lwjgl.input.Mouse;
 import org.spongepowered.asm.mixin.Mixin;
@@ -12,6 +13,8 @@ import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+import com.gtnewhorizon.gtnhlib.config.ConfigException;
 
 @Mixin(GuiChat.class)
 public abstract class MixinGuiChat extends GuiScreen {
@@ -40,7 +43,16 @@ public abstract class MixinGuiChat extends GuiScreen {
 
         String insertText = minemoticon$picker.mouseClicked(mouseX, mouseY, button);
         if (insertText != null) {
+            inputField.setFocused(true);
             inputField.writeText(insertText + " ");
+            ci.cancel();
+            return;
+        }
+
+        if (minemoticon$picker.shouldOpenConfig()) {
+            try {
+                mc.displayGuiScreen(new MinemoticonGuiConfig(this));
+            } catch (ConfigException ignored) {}
             ci.cancel();
             return;
         }
@@ -49,6 +61,7 @@ public abstract class MixinGuiChat extends GuiScreen {
             ci.cancel();
         } else if (minemoticon$picker.isOpen()) {
             minemoticon$picker.toggle();
+            inputField.setFocused(true);
         }
     }
 
@@ -56,7 +69,11 @@ public abstract class MixinGuiChat extends GuiScreen {
     private void minemoticon$keyTyped(char c, int keyCode, CallbackInfo ci) {
         if (minemoticon$picker != null && minemoticon$picker.keyTyped(c, keyCode)) {
             String text = minemoticon$picker.consumeInsertText();
-            if (text != null) inputField.writeText(text + " ");
+            if (text != null) {
+                inputField.setFocused(true);
+                inputField.writeText(text + " ");
+            }
+            inputField.setFocused(true);
             ci.cancel();
         }
     }
