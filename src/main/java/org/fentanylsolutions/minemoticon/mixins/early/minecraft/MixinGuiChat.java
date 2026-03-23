@@ -6,6 +6,7 @@ import net.minecraft.client.gui.GuiTextField;
 
 import org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfig;
 import org.fentanylsolutions.minemoticon.gui.EmojiPickerGui;
+import org.fentanylsolutions.minemoticon.gui.EmojiSuggestionHelper;
 import org.lwjgl.input.Mouse;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -25,13 +26,21 @@ public abstract class MixinGuiChat extends GuiScreen {
     @Unique
     private EmojiPickerGui minemoticon$picker;
 
+    @Unique
+    private EmojiSuggestionHelper minemoticon$suggestions;
+
     @Inject(method = "initGui", at = @At("TAIL"))
     private void minemoticon$initGui(CallbackInfo ci) {
         minemoticon$picker = new EmojiPickerGui(inputField, fontRendererObj, width, height);
+        minemoticon$suggestions = new EmojiSuggestionHelper(inputField, fontRendererObj);
     }
 
     @Inject(method = "drawScreen", at = @At("TAIL"))
     private void minemoticon$drawScreen(int mouseX, int mouseY, float partialTicks, CallbackInfo ci) {
+        if (minemoticon$suggestions != null) {
+            minemoticon$suggestions.update();
+            minemoticon$suggestions.render(mouseX, mouseY);
+        }
         if (minemoticon$picker != null) {
             minemoticon$picker.render(mouseX, mouseY);
         }
@@ -39,6 +48,13 @@ public abstract class MixinGuiChat extends GuiScreen {
 
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void minemoticon$mouseClicked(int mouseX, int mouseY, int button, CallbackInfo ci) {
+        // Suggestions click
+        if (minemoticon$suggestions != null && minemoticon$suggestions.mouseClicked(mouseX, mouseY, button)) {
+            inputField.setFocused(true);
+            ci.cancel();
+            return;
+        }
+
         if (minemoticon$picker == null) return;
 
         String insertText = minemoticon$picker.mouseClicked(mouseX, mouseY, button);
@@ -67,6 +83,14 @@ public abstract class MixinGuiChat extends GuiScreen {
 
     @Inject(method = "keyTyped", at = @At("HEAD"), cancellable = true)
     private void minemoticon$keyTyped(char c, int keyCode, CallbackInfo ci) {
+        // Suggestions get priority when active
+        if (minemoticon$suggestions != null && minemoticon$suggestions.isActive()
+            && minemoticon$suggestions.keyTyped(c, keyCode)) {
+            inputField.setFocused(true);
+            ci.cancel();
+            return;
+        }
+
         if (minemoticon$picker != null && minemoticon$picker.keyTyped(c, keyCode)) {
             String text = minemoticon$picker.consumeInsertText();
             if (text != null) {
