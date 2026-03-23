@@ -2,7 +2,7 @@ package org.fentanylsolutions.minemoticon;
 
 import com.gtnewhorizon.gtnhlib.config.Config;
 
-@Config(modid = Minemoticon.MODID, category = "server")
+@Config(modid = Minemoticon.MODID, category = "server", configSubDirectory = "minemoticon")
 @Config.Sync
 public class ServerConfig {
 

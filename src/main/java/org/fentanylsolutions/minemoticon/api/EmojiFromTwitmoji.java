@@ -7,7 +7,7 @@ import net.minecraft.util.ResourceLocation;
 
 import org.fentanylsolutions.minemoticon.Minemoticon;
 
-public class EmojiFromTwitmoji extends Emoji {
+public class EmojiFromTwitmoji extends Emoji implements RenderableEmoji {
 
     private static final String TWEMOJI_CDN = "https://raw.githubusercontent.com/iamcal/emoji-data/master/img-twitter-64/";
 

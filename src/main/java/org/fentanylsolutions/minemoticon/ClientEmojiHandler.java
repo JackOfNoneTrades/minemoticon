@@ -1,8 +1,11 @@
 package org.fentanylsolutions.minemoticon;
 
+import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -12,6 +15,7 @@ import java.util.Map;
 import java.util.Scanner;
 
 import org.fentanylsolutions.minemoticon.api.Emoji;
+import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
 
 import com.google.gson.JsonElement;
@@ -35,19 +39,175 @@ public class ClientEmojiHandler {
     // Standard category order matching most chat platforms
     private static final String[] CATEGORY_ORDER = { "Smileys & Emotion", "People & Body", "Animals & Nature",
         "Food & Drink", "Travel & Places", "Activities", "Objects", "Symbols", "Flags" };
+    // Pack emojis tracked separately for reload cleanup
+    private static final List<EmojiFromPack> PACK_EMOJIS = new ArrayList<>();
+    // Maps pack category name -> icon emoji (for category pill in picker)
+    public static final Map<String, Emoji> PACK_CATEGORY_ICONS = new HashMap<>();
     public static boolean error = false;
+    private static volatile boolean ready = false;
 
-    public static void setup() {
-        if (EmojiConfig.enableTwemoji) {
-            loadTwemojis();
-        }
-        buildPickerData();
-        Minemoticon.LOG.info("Loaded {} emojis", EMOJI_LIST.size());
+    public static boolean isReady() {
+        return ready;
     }
 
-    public static void loadTwemojis() {
+    public static void setup() {
+        // Load packs synchronously (local files, fast)
+        loadPacks();
+
+        // Load twemoji from bundled/cached data synchronously (instant, no network)
+        if (EmojiConfig.enableTwemoji) {
+            String localData = loadLocalEmojiJson();
+            if (localData != null) {
+                parseTwemojis(localData);
+            }
+        }
+
+        buildPickerData();
+        ready = true;
+        Minemoticon.LOG.info("Loaded {} emojis ({} from packs)", EMOJI_LIST.size(), PACK_EMOJIS.size());
+
+        // Check for emoji data updates in the background
+        if (EmojiConfig.enableTwemoji && EmojiConfig.checkForEmojiUpdates) {
+            new Thread(() -> {
+                String updated = downloadEmojiJsonUpdate();
+                if (updated != null) {
+                    clearTwemojiData();
+                    parseTwemojis(updated);
+                    buildPickerData();
+                    Minemoticon.LOG.info("Updated emoji data, now {} emojis", EMOJI_LIST.size());
+                }
+            }, "Minemoticon Emoji Updater").start();
+        }
+    }
+
+    public static void reloadPacks() {
+        // Destroy old pack textures
+        for (var pack : PACK_EMOJIS) {
+            pack.destroy();
+            for (String key : pack.strings) {
+                EMOJI_LOOKUP.remove(key);
+            }
+            EMOJI_LIST.remove(pack);
+        }
+        for (var cat : new ArrayList<>(EMOJI_MAP.keySet())) {
+            if (!isStandardCategory(cat)) {
+                EMOJI_MAP.remove(cat);
+            }
+        }
+        PACK_EMOJIS.clear();
+        PACK_CATEGORY_ICONS.clear();
+
+        loadPacks();
+        buildPickerData();
+        Minemoticon.LOG.info("Reloaded packs: {} pack emojis", PACK_EMOJIS.size());
+    }
+
+    private static void loadPacks() {
+        var packs = EmojiPackLoader.loadPacks();
+        for (var pack : packs) {
+            // Find icon emoji
+            Emoji iconEmoji = null;
+            if (pack.iconEmojiName != null) {
+                for (var e : pack.emojis) {
+                    if (e.name.equals(pack.iconEmojiName)) {
+                        iconEmoji = e;
+                        break;
+                    }
+                }
+            }
+            if (iconEmoji == null && !pack.emojis.isEmpty()) {
+                iconEmoji = pack.emojis.get(0);
+            }
+            if (iconEmoji != null) {
+                PACK_CATEGORY_ICONS.put(pack.name, iconEmoji);
+            }
+
+            for (var emoji : pack.emojis) {
+                EMOJI_LOOKUP.put(":" + emoji.name + ":", emoji);
+                EMOJI_MAP.computeIfAbsent(pack.name, k -> new ArrayList<>())
+                    .add(emoji);
+                EMOJI_LIST.add(emoji);
+                PACK_EMOJIS.add(emoji);
+            }
+        }
+    }
+
+    private static final String EMOJI_JSON_URL = "https://raw.githubusercontent.com/iamcal/emoji-data/master/emoji.json";
+    private static final File EMOJI_CACHE_FILE = new File("config/minemoticon/emoji_data.json");
+    private static final String BUNDLED_RESOURCE = "/assets/minemoticon/emoji_data.json";
+
+    // Load emoji JSON from cache or bundled resource (no network)
+    private static String loadLocalEmojiJson() {
+        // Try disk cache first
+        if (EMOJI_CACHE_FILE.isFile()) {
+            try {
+                var data = new String(Files.readAllBytes(EMOJI_CACHE_FILE.toPath()), StandardCharsets.UTF_8);
+                Minemoticon.debug("Loaded emoji data from cache ({} bytes)", data.length());
+                return data;
+            } catch (IOException e) {
+                Minemoticon.LOG.warn("Failed to read emoji cache", e);
+            }
+        }
+
+        // Fall back to bundled resource in jar
+        try (var stream = ClientEmojiHandler.class.getResourceAsStream(BUNDLED_RESOURCE)) {
+            if (stream != null) {
+                var scanner = new Scanner(stream, StandardCharsets.UTF_8.toString());
+                scanner.useDelimiter("\\A");
+                var data = scanner.hasNext() ? scanner.next() : "";
+                Minemoticon.debug("Loaded emoji data from bundled resource ({} bytes)", data.length());
+                return data;
+            }
+        } catch (IOException e) {
+            Minemoticon.LOG.warn("Failed to read bundled emoji data", e);
+        }
+
+        return null;
+    }
+
+    // Check for updated emoji data, returns new JSON or null if no update
+    private static String downloadEmojiJsonUpdate() {
         try {
-            var jsonText = readStringFromURL("https://raw.githubusercontent.com/iamcal/emoji-data/master/emoji.json");
+            var conn = (HttpURLConnection) new URL(EMOJI_JSON_URL).openConnection();
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Minemoticon)");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(10000);
+
+            if (EMOJI_CACHE_FILE.isFile()) {
+                conn.setIfModifiedSince(EMOJI_CACHE_FILE.lastModified());
+            }
+
+            conn.connect();
+            int code = conn.getResponseCode();
+
+            if (code == 304) {
+                Minemoticon.debug("Emoji data not modified, using current data");
+                return null;
+            }
+
+            if (code / 100 == 2) {
+                try (var scanner = new Scanner(conn.getInputStream(), StandardCharsets.UTF_8.toString())) {
+                    scanner.useDelimiter("\\A");
+                    String fresh = scanner.hasNext() ? scanner.next() : "";
+                    if (!fresh.isEmpty()) {
+                        EMOJI_CACHE_FILE.getParentFile()
+                            .mkdirs();
+                        Files.write(EMOJI_CACHE_FILE.toPath(), fresh.getBytes(StandardCharsets.UTF_8));
+                        Minemoticon.debug("Downloaded updated emoji data ({} bytes)", fresh.length());
+                        return fresh;
+                    }
+                }
+            }
+
+            Minemoticon.LOG.warn("Emoji data download returned HTTP {}", code);
+        } catch (IOException e) {
+            Minemoticon.debug("Failed to check for emoji updates: {}", e.getMessage());
+        }
+        return null;
+    }
+
+    private static void parseTwemojis(String jsonText) {
+        try {
             var root = new JsonParser().parse(jsonText);
 
             for (JsonElement element : root.getAsJsonArray()) {
@@ -105,13 +265,24 @@ public class ClientEmojiHandler {
             EMOJI_WITH_TEXTS.sort(Comparator.comparingInt(e -> e.sort));
             EMOJI_MAP.values()
                 .forEach(list -> list.sort(Comparator.comparingInt(e -> e.sort)));
-
-            // Sort unicode keys longest-first so we match the most specific variant
             UNICODE_KEYS_BY_CHAR.values()
                 .forEach(list -> list.sort((a, b) -> b.length() - a.length()));
         } catch (Exception e) {
             error = true;
-            Minemoticon.LOG.error("Failed to load twemojis", e);
+            Minemoticon.LOG.error("Failed to parse twemoji data", e);
+        }
+    }
+
+    private static void clearTwemojiData() {
+        EMOJI_LIST.removeIf(e -> e instanceof EmojiFromTwitmoji);
+        EMOJI_WITH_TEXTS.removeIf(e -> e instanceof EmojiFromTwitmoji);
+        EMOJI_LOOKUP.values()
+            .removeIf(e -> e instanceof EmojiFromTwitmoji);
+        EMOJI_UNICODE_LOOKUP.values()
+            .removeIf(e -> e instanceof EmojiFromTwitmoji);
+        UNICODE_KEYS_BY_CHAR.clear();
+        for (String cat : CATEGORY_ORDER) {
+            EMOJI_MAP.remove(cat);
         }
     }
 
@@ -178,13 +349,4 @@ public class ClientEmojiHandler {
         return sb.toString();
     }
 
-    public static String readStringFromURL(String requestURL) {
-        try (var scanner = new Scanner(new URL(requestURL).openStream(), StandardCharsets.UTF_8.toString())) {
-            scanner.useDelimiter("\\A");
-            return scanner.hasNext() ? scanner.next() : "";
-        } catch (IOException e) {
-            Minemoticon.LOG.error("Failed to read from URL: {}", requestURL, e);
-            return "";
-        }
-    }
 }

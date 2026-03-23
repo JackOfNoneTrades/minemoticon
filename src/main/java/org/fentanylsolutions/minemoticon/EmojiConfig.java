@@ -2,7 +2,7 @@ package org.fentanylsolutions.minemoticon;
 
 import com.gtnewhorizon.gtnhlib.config.Config;
 
-@Config(modid = Minemoticon.MODID, category = "emoji")
+@Config(modid = Minemoticon.MODID, category = "emoji", configSubDirectory = "minemoticon")
 @Config.RequiresMcRestart
 public class EmojiConfig {
 
@@ -26,6 +26,10 @@ public class EmojiConfig {
     @Config.Comment("Render custom emotes sent by other players")
     @Config.DefaultBoolean(true)
     public static boolean receiveClientEmotes;
+
+    @Config.Comment("Check for emoji data updates on startup (uses If-Modified-Since)")
+    @Config.DefaultBoolean(true)
+    public static boolean checkForEmojiUpdates;
 
     @Config.Comment("Enable debug logging")
     @Config.DefaultBoolean(false)

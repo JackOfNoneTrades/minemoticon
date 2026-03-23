@@ -2,7 +2,7 @@ package org.fentanylsolutions.minemoticon.mixins.early.minecraft;
 
 import net.minecraft.client.gui.FontRenderer;
 
-import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -59,7 +59,7 @@ public abstract class MixinFontRenderer {
         try {
             int width = 0;
             for (var seg : segments) {
-                if (seg instanceof EmojiFromTwitmoji) {
+                if (seg instanceof RenderableEmoji) {
                     width += (int) EmojiRenderer.EMOJI_SIZE;
                 } else {
                     width += this.getStringWidth((String) seg);
@@ -82,7 +82,7 @@ public abstract class MixinFontRenderer {
         minemoticon$rendering = true;
         try {
             for (var seg : segments) {
-                if (seg instanceof EmojiFromTwitmoji emoji) {
+                if (seg instanceof RenderableEmoji emoji) {
                     if (!shadow) {
                         EmojiRenderer.renderQuad(emoji, this.posX, this.posY);
                         // Restore font color after emoji quad reset it to white

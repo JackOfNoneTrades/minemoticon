@@ -7,7 +7,7 @@ import net.minecraft.client.Minecraft;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.api.Emoji;
-import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.lwjgl.opengl.GL11;
 
 public class EmojiRenderer {
@@ -33,7 +33,7 @@ public class EmojiRenderer {
                 if (end != -1) {
                     String key = text.substring(i, end + 1);
                     Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
-                    if (emoji instanceof EmojiFromTwitmoji twitmoji) {
+                    if (emoji instanceof RenderableEmoji twitmoji) {
                         if (segments == null) segments = new ArrayList<>();
                         if (i > lastEnd) segments.add(text.substring(lastEnd, i));
                         segments.add(twitmoji);
@@ -46,13 +46,13 @@ public class EmojiRenderer {
 
             // Try Unicode emoji match
             int matchLen = 0;
-            EmojiFromTwitmoji unicodeMatch = null;
+            RenderableEmoji unicodeMatch = null;
             var candidates = ClientEmojiHandler.UNICODE_KEYS_BY_CHAR.get(text.charAt(i));
             if (candidates != null) {
                 for (String candidate : candidates) { // sorted longest-first
                     if (text.startsWith(candidate, i)) {
                         Emoji e = ClientEmojiHandler.EMOJI_UNICODE_LOOKUP.get(candidate);
-                        if (e instanceof EmojiFromTwitmoji t) {
+                        if (e instanceof RenderableEmoji t) {
                             unicodeMatch = t;
                             matchLen = candidate.length();
                             break;
@@ -80,7 +80,7 @@ public class EmojiRenderer {
         return segments;
     }
 
-    public static void renderQuad(EmojiFromTwitmoji emoji, float x, float y) {
+    public static void renderQuad(RenderableEmoji emoji, float x, float y) {
         var texLoc = emoji.getResourceLocation();
         Minecraft.getMinecraft()
             .getTextureManager()

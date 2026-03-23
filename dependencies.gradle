@@ -44,7 +44,7 @@ dependencies {
 
     implementation("com.github.GTNewHorizons:GTNHLib:0.9.45:dev")
 
-    devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:330d224-snapshot:dev")
+    devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:2ae0f26-snapshot:dev")
     devOnlyNonPublishable("org.fentanylsolutions.tabfaces:TabFaces:b7968cf-snapshot")
     devOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.48-1.7.10:dev")
 }

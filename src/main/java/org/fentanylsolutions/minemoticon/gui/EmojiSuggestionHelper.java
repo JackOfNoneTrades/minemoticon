@@ -9,7 +9,7 @@ import net.minecraft.client.gui.GuiTextField;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.api.Emoji;
-import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.mixins.early.minecraft.AccessorGuiTextField;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.lwjgl.opengl.GL11;
@@ -125,7 +125,7 @@ public class EmojiSuggestionHelper {
             }
 
             // Emoji icon
-            if (emoji instanceof EmojiFromTwitmoji t) {
+            if (emoji instanceof RenderableEmoji t) {
                 EmojiRenderer.renderQuad(t, popupX, rowY + 1);
                 GL11.glColor4f(1, 1, 1, 1);
             }

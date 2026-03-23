@@ -27,7 +27,11 @@ import org.fentanylsolutions.minemoticon.Minemoticon;
 // Downloads an image from a URL, caches to disk, and uploads to GL on next bind.
 public class DownloadedTexture extends AbstractTexture {
 
-    private static final ExecutorService DOWNLOAD_POOL = createDownloadPool();
+    static final ExecutorService DOWNLOAD_POOL = createDownloadPool();
+
+    public static void submitToPool(Runnable task) {
+        DOWNLOAD_POOL.execute(task);
+    }
 
     private final File cacheFile;
     private final String imageUrl;

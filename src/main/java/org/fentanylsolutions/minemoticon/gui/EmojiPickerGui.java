@@ -14,6 +14,7 @@ import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
@@ -283,9 +284,14 @@ public class EmojiPickerGui {
             }
 
             String cat = categories.get(i);
-            var emojis = ClientEmojiHandler.EMOJI_MAP.get(cat);
-            if (emojis != null && !emojis.isEmpty() && emojis.get(0) instanceof EmojiFromTwitmoji t) {
-                EmojiRenderer.renderQuad(t, sidebarX + 2, y + 1);
+            // Use pack icon if available, otherwise first emoji in category
+            Emoji icon = ClientEmojiHandler.PACK_CATEGORY_ICONS.get(cat);
+            if (icon == null) {
+                var emojis = ClientEmojiHandler.EMOJI_MAP.get(cat);
+                if (emojis != null && !emojis.isEmpty()) icon = emojis.get(0);
+            }
+            if (icon instanceof RenderableEmoji r) {
+                EmojiRenderer.renderQuad(r, sidebarX + 2, y + 1);
             }
         }
         GL11.glColor4f(1, 1, 1, 1);
@@ -336,7 +342,7 @@ public class EmojiPickerGui {
                         hoveredEmoji = emojis[col];
                     }
 
-                    if (emojis[col] instanceof EmojiFromTwitmoji t) {
+                    if (emojis[col] instanceof RenderableEmoji t) {
                         EmojiRenderer.renderQuad(t, x + 1, cellTop + 2);
                     }
                 }
@@ -371,7 +377,7 @@ public class EmojiPickerGui {
         Gui.drawRect(panelX, infoY, panelX + panelW, infoY + INFO_H, 0x80000000);
         if (hoveredEmoji == null) return;
 
-        if (hoveredEmoji instanceof EmojiFromTwitmoji t) {
+        if (hoveredEmoji instanceof RenderableEmoji t) {
             EmojiRenderer.renderQuad(t, panelX + PAD + 1, infoY + 2);
             GL11.glColor4f(1, 1, 1, 1);
         }
