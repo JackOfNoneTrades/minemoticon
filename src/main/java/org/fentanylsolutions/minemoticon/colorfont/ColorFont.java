@@ -21,17 +21,19 @@ public class ColorFont {
     private final CpalParser cpal;
     private final GlyfParser glyf; // null if no glyf table (CBDT-only fonts)
     private final CbdtParser cbdt; // null if no CBDT table
+    private final SvgParser svg; // null if no SVG table
     private final int unitsPerEm;
     private final int ascent;
     private final int descent;
 
     private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, CbdtParser cbdt,
-        int unitsPerEm, int ascent, int descent) {
+        SvgParser svg, int unitsPerEm, int ascent, int descent) {
         this.cmap = cmap;
         this.colr = colr;
         this.cpal = cpal;
         this.glyf = glyf;
         this.cbdt = cbdt;
+        this.svg = svg;
         this.unitsPerEm = unitsPerEm;
         this.ascent = ascent;
         this.descent = descent;
@@ -45,9 +47,10 @@ public class ColorFont {
         }
         boolean hasGlyf = reader.hasTable("glyf") && reader.hasTable("loca");
         boolean hasCbdt = reader.hasTable("CBDT") && reader.hasTable("CBLC");
+        boolean hasSvg = reader.hasTable("SVG ");
 
-        if (!hasGlyf && !hasCbdt) {
-            throw new IOException("Font has no renderable glyph data (needs glyf or CBDT)");
+        if (!hasGlyf && !hasCbdt && !hasSvg) {
+            throw new IOException("Font has no renderable glyph data (needs glyf, CBDT, or SVG)");
         }
 
         var head = new HeadParser(reader.getTable("head"));
@@ -78,6 +81,12 @@ public class ColorFont {
             cpalTable = new CpalParser.Empty();
         }
 
+        // SVG table (optional, best quality for SVGinOT fonts)
+        SvgParser svgTable = null;
+        if (reader.hasTable("SVG ")) {
+            svgTable = new SvgParser(reader.getTable("SVG "), head.unitsPerEm, head.ascent, head.descent);
+        }
+
         if (reader.hasTable("hhea")) {
             head.parseHhea(reader.getTable("hhea"));
         }
@@ -88,13 +97,17 @@ public class ColorFont {
             cpalTable,
             glyfTable,
             cbdtTable,
+            svgTable,
             head.unitsPerEm,
             head.ascent,
             head.descent);
     }
 
     public boolean hasAnyColorGlyphs() {
-        return colr.getLayerCount() > 0;
+        if (colr.getLayerCount() > 0) return true;
+        if (cbdt != null && cbdt.getGlyphCount() > 0) return true;
+        if (svg != null && svg.getGlyphCount() > 0) return true;
+        return false;
     }
 
     // Check if a multi-codepoint sequence can be rendered
@@ -115,8 +128,8 @@ public class ColorFont {
     public boolean hasGlyph(int codepoint) {
         int glyphId = cmap.getGlyphId(codepoint);
         if (glyphId == 0) return false;
-        // Has CBDT bitmap, COLR layers, or actual glyf outline data
         if (cbdt != null && cbdt.hasBitmap(glyphId)) return true;
+        if (svg != null && svg.hasSvg(glyphId)) return true;
         if (colr.hasLayers(glyphId)) return true;
         return glyf != null && glyf.hasOutline(glyphId);
     }
@@ -126,9 +139,12 @@ public class ColorFont {
         int glyphId = cmap.getGlyphId(codepoint);
         if (glyphId == 0) return null;
 
-        // Try CBDT bitmap first (pre-rendered, best quality)
+        // Priority: CBDT bitmap > SVG > COLR v0 > monochrome glyf
         if (cbdt != null && cbdt.hasBitmap(glyphId)) {
             return scaleBitmap(cbdt.getBitmap(glyphId), size);
+        }
+        if (svg != null && svg.hasSvg(glyphId)) {
+            return svg.renderGlyph(glyphId, size);
         }
         return renderGlyphById(glyphId, size);
     }
