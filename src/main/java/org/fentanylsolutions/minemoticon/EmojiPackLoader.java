@@ -94,7 +94,10 @@ public class EmojiPackLoader {
 
         File[] files = dir.listFiles((d, name) -> {
             var lower = name.toLowerCase();
-            return lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+            return lower.endsWith(".png") || lower.endsWith(".jpg")
+                || lower.endsWith(".jpeg")
+                || lower.endsWith(".qoi")
+                || lower.endsWith(".webp");
         });
         if (files == null || files.length == 0) return null;
 

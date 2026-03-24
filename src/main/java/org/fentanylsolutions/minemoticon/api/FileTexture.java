@@ -11,9 +11,12 @@ import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.client.resources.IResourceManager;
 
+import org.fentanylsolutions.fentlib.util.QoiUtil;
+import org.fentanylsolutions.fentlib.util.WebpUtil;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 
 // Loads an image from a local file and uploads to GL lazily.
+// Supports PNG, JPG, QOI, and WebP.
 public class FileTexture extends AbstractTexture {
 
     private final File imageFile;
@@ -30,10 +33,9 @@ public class FileTexture extends AbstractTexture {
 
     @Override
     public void loadTexture(IResourceManager resourceManager) throws IOException {
-        // Submit file read to the shared download pool (reuse existing thread pool)
         DownloadedTexture.submitToPool(() -> {
             try {
-                pendingImage.set(ImageIO.read(imageFile));
+                pendingImage.set(readImage(imageFile));
             } catch (IOException e) {
                 Minemoticon.LOG.error("Failed to read pack emoji from {}", imageFile.getName(), e);
             }
@@ -49,5 +51,17 @@ public class FileTexture extends AbstractTexture {
             uploaded = true;
         }
         return id;
+    }
+
+    public static BufferedImage readImage(File file) throws IOException {
+        String name = file.getName()
+            .toLowerCase();
+        if (name.endsWith(".qoi")) {
+            return QoiUtil.readImage(file);
+        } else if (name.endsWith(".webp")) {
+            return WebpUtil.readImage(file);
+        } else {
+            return ImageIO.read(file);
+        }
     }
 }

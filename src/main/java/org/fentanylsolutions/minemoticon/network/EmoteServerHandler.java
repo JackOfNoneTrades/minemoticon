@@ -14,6 +14,8 @@ import javax.imageio.ImageIO;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
 
+import org.fentanylsolutions.fentlib.util.QoiUtil;
+import org.fentanylsolutions.fentlib.util.WebpUtil;
 import org.fentanylsolutions.minemoticon.EmojiPackLoader;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.ServerConfig;
@@ -185,13 +187,34 @@ public class EmoteServerHandler {
         broadcastEmote(pending.name, cached, player);
     }
 
+    // Try decoding image bytes as PNG/JPG, QOI, or WebP
+    private static BufferedImage decodeImage(byte[] raw) {
+        // Try standard ImageIO first (PNG, JPG, GIF, BMP)
+        try {
+            BufferedImage img = ImageIO.read(new ByteArrayInputStream(raw));
+            if (img != null) return img;
+        } catch (Exception ignored) {}
+
+        // Try QOI
+        try {
+            return QoiUtil.readImage(raw);
+        } catch (Exception ignored) {}
+
+        // Try WebP
+        try {
+            return WebpUtil.readImage(raw);
+        } catch (Exception ignored) {}
+
+        return null;
+    }
+
     private static byte[] sanitize(byte[] raw) {
         return sanitize(raw, true);
     }
 
     private static byte[] sanitize(byte[] raw, boolean enforceMaxDimension) {
         try {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(raw));
+            BufferedImage img = decodeImage(raw);
             if (img == null) return null;
 
             if (enforceMaxDimension && (img.getWidth() > MAX_DIMENSION || img.getHeight() > MAX_DIMENSION)) {
