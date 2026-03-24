@@ -1,27 +1,27 @@
 #include "com_mlomb_freetypejni_FreeType.h"
 #include "com_mlomb_freetypejni_Utils.h"
-#include <sstream>
-#include <string>
+#include <stdlib.h>
+#include <string.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
 /* --- Helper functions --- */
 
 JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_Utils_newBuffer(JNIEnv *env, jclass obj, jint size) {
-	return env->NewDirectByteBuffer((char*)malloc(size), size);
+	return (*env)->NewDirectByteBuffer(env, (char*)malloc(size), size);
 }
 
 JNIEXPORT void JNICALL Java_com_mlomb_freetypejni_Utils_fillBuffer(JNIEnv *env, jclass obj, jbyteArray bytes, jobject buffer, jint length) {
-	unsigned char* dst = (unsigned char*)(buffer ? env->GetDirectBufferAddress(buffer) : 0);
-	char* src = (char*)env->GetPrimitiveArrayCritical(bytes, 0);
+	unsigned char* dst = (unsigned char*)(buffer ? (*env)->GetDirectBufferAddress(env, buffer) : 0);
+	char* src = (char*)(*env)->GetPrimitiveArrayCritical(env, bytes, 0);
 
 	memcpy(dst, src, length);
 
-	env->ReleasePrimitiveArrayCritical(bytes, src, 0);
+	(*env)->ReleasePrimitiveArrayCritical(env, bytes, src, 0);
 }
 
 JNIEXPORT void JNICALL Java_com_mlomb_freetypejni_Utils_deleteBuffer(JNIEnv *env, jclass obj, jobject buffer) {
-	char* b = (char*)(buffer ? env->GetDirectBufferAddress(buffer) : 0);
+	char* b = (char*)(buffer ? (*env)->GetDirectBufferAddress(env, buffer) : 0);
 	free(b);
 }
 
@@ -31,9 +31,9 @@ JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Library_1Versi
 	int major, minor, patch;
 	FT_Library_Version((FT_Library)library, &major, &minor, &patch);
 
-	jclass cls = env->FindClass("com/mlomb/freetypejni/LibraryVersion");
-	jmethodID methodID = env->GetMethodID(cls, "<init>", "(III)V");
-	jobject a = env->NewObject(cls, methodID, major, minor, patch);
+	jclass cls = (*env)->FindClass(env, "com/mlomb/freetypejni/LibraryVersion");
+	jmethodID methodID = (*env)->GetMethodID(env, cls, "<init>", "(III)V");
+	jobject a = (*env)->NewObject(env, cls, methodID, major, minor, patch);
 	return a;
 }
 JNIEXPORT jlong JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Init_1FreeType(JNIEnv *env, jclass obj) {
@@ -48,7 +48,7 @@ JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Done_1FreeTyp
 }
 
 JNIEXPORT jlong JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1New_1Memory_1Face(JNIEnv *env, jclass obj, jlong lib, jobject buffer, jint length, jlong faceIndex) {
-	char* data = (char*)(buffer ? env->GetDirectBufferAddress(buffer) : 0);
+	char* data = (char*)(buffer ? (*env)->GetDirectBufferAddress(env, buffer) : 0);
 	FT_Face face = NULL;
 	if (FT_New_Memory_Face((FT_Library)lib, (const FT_Byte*)data, length, faceIndex, &face))
 		return 0;
@@ -79,7 +79,7 @@ JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1face_1
 	return ((FT_Face)face)->face_index;
 }
 JNIEXPORT jstring JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1family_1name(JNIEnv *env, jclass obj, jlong face) {
-	return env->NewStringUTF(((FT_Face)face)->family_name);
+	return (*env)->NewStringUTF(env, ((FT_Face)face)->family_name);
 }
 JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1heigth(JNIEnv *env, jclass obj, jlong face) {
 	return ((FT_Face)face)->height;
@@ -100,7 +100,7 @@ JNIEXPORT jlong JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1style
 	return ((FT_Face)face)->style_flags;
 }
 JNIEXPORT jstring JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1style_1name(JNIEnv *env, jclass obj, jlong face) {
-	return env->NewStringUTF(((FT_Face)face)->style_name);
+	return (*env)->NewStringUTF(env, ((FT_Face)face)->style_name);
 }
 JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1underline_1position(JNIEnv *env, jclass obj, jlong face) {
 	return ((FT_Face)face)->underline_position;
@@ -162,13 +162,13 @@ JNIEXPORT jlongArray JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1
 	if (FT_Get_Kerning((FT_Face)face, left, right, mode, &vector))
 		return 0;
 
-	jlongArray result = env->NewLongArray(2);
+	jlongArray result = (*env)->NewLongArray(env, 2);
 	if (result == NULL) // Out of memory
 		return NULL;
 	jlong fill[2];
 	fill[0] = vector.x;
 	fill[1] = vector.y;
-	env->SetLongArrayRegion(result, 0, 2, fill);
+	(*env)->SetLongArrayRegion(env, result, 0, 2, fill);
 
 	return result;
 }
@@ -197,9 +197,9 @@ JNIEXPORT jlong JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1GlyphSlot_1Get_1
 JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1GlyphSlot_1Get_1advance(JNIEnv *env, jclass obj, jlong glyph) {
 	FT_Vector vector = ((FT_GlyphSlot)glyph)->advance;
 
-	jclass cls = env->FindClass("com/mlomb/freetypejni/GlyphSlot$Advance");
-	jmethodID methodID = env->GetMethodID(cls, "<init>", "(II)V");
-	jobject a = env->NewObject(cls, methodID, (jlong)vector.x, (jlong)vector.y);
+	jclass cls = (*env)->FindClass(env, "com/mlomb/freetypejni/GlyphSlot$Advance");
+	jmethodID methodID = (*env)->GetMethodID(env, cls, "<init>", "(II)V");
+	jobject a = (*env)->NewObject(env, cls, methodID, (jlong)vector.x, (jlong)vector.y);
 	return a;
 }
 JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1GlyphSlot_1Get_1format(JNIEnv *env, jclass obj, jlong glyph) {
@@ -240,7 +240,7 @@ JNIEXPORT jchar JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Bitmap_1Get_1pix
 }
 JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Bitmap_1Get_1buffer(JNIEnv *env, jclass obj, jlong bitmap) {
 	FT_Bitmap* bmp = (FT_Bitmap*)bitmap;
-	return env->NewDirectByteBuffer((void*)bmp->buffer, bmp->rows * bmp->width * abs(bmp->pitch));
+	return (*env)->NewDirectByteBuffer(env, (void*)bmp->buffer, bmp->rows * bmp->width * abs(bmp->pitch));
 }
 JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Glyph_1Metrics_1Get_1width(JNIEnv *env, jclass obj, jlong glyphMetrics) {
 	return ((FT_Glyph_Metrics*)glyphMetrics)->width;
@@ -276,14 +276,14 @@ JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Reference_1Fa
 	return FT_Reference_Face((FT_Face)face);
 }
 JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Request_1Size(JNIEnv *env, jclass obj, jlong face, jobject sizeRequest) {
-	jclass sizeRequestClass = env->GetObjectClass(sizeRequest);
-
-	FT_Size_RequestRec req = {};
-	req.height = env->GetLongField(sizeRequest, env->GetFieldID(sizeRequestClass, "height", "J"));
-	req.width = env->GetLongField(sizeRequest, env->GetFieldID(sizeRequestClass, "width", "J"));
-	req.horiResolution = env->GetIntField(sizeRequest, env->GetFieldID(sizeRequestClass, "horiResolution", "I"));
-	req.vertResolution = env->GetIntField(sizeRequest, env->GetFieldID(sizeRequestClass, "vertResolution", "I"));
-	req.type = (FT_Size_Request_Type)(env->GetIntField(sizeRequest, env->GetFieldID(sizeRequestClass, "type", "I")));
+	jclass sizeRequestClass = (*env)->GetObjectClass(env, sizeRequest);
+	
+	FT_Size_RequestRec req = {0};
+	req.height = (*env)->GetLongField(env, sizeRequest, (*env)->GetFieldID(env, sizeRequestClass, "height", "J"));
+	req.width = (*env)->GetLongField(env, sizeRequest, (*env)->GetFieldID(env, sizeRequestClass, "width", "J"));
+	req.horiResolution = (*env)->GetIntField(env, sizeRequest, (*env)->GetFieldID(env, sizeRequestClass, "horiResolution", "I"));
+	req.vertResolution = (*env)->GetIntField(env, sizeRequest, (*env)->GetFieldID(env, sizeRequestClass, "vertResolution", "I"));
+	req.type = (FT_Size_Request_Type)((*env)->GetIntField(env, sizeRequest, (*env)->GetFieldID(env, sizeRequestClass, "type", "I")));
 
 	return FT_Request_Size((FT_Face)face, (FT_Size_Request)&req);
 }
@@ -292,13 +292,13 @@ JNIEXPORT jintArray JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1First_1
 	FT_UInt   gindex;
 	charcode = FT_Get_First_Char((FT_Face)face, &gindex);
 
-	jintArray result = env->NewIntArray(2);
+	jintArray result = (*env)->NewIntArray(env, 2);
 	if (result == NULL) // Out of memory
 		return NULL;
 	jint fill[2];
 	fill[0] = charcode;
 	fill[1] = gindex;
-	env->SetIntArrayRegion(result, 0, 2, fill);
+	(*env)->SetIntArrayRegion(env, result, 0, 2, fill);
 
 	return result;
 }
@@ -308,9 +308,9 @@ JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1Next_1Char(J
 	return gindex;
 }
 JNIEXPORT jint JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1Name_1Index(JNIEnv *env, jclass obj, jlong face, jstring name) {
-	const char *nameNative = env->GetStringUTFChars(name, 0);
+	const char *nameNative = (*env)->GetStringUTFChars(env, name, 0);
 	jint glyphIndex = FT_Get_Name_Index((FT_Face)face, (char*)nameNative);
-	env->ReleaseStringUTFChars(name, nameNative);
+	(*env)->ReleaseStringUTFChars(env, name, nameNative);
 	return glyphIndex;
 }
 JNIEXPORT jlong JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1Track_1Kerning(JNIEnv *env, jclass obj, jlong face, jlong point_size, jint degree) {
@@ -320,12 +320,12 @@ JNIEXPORT jlong JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1Track_1Kern
 	return kern;
 }
 JNIEXPORT jstring JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1Glyph_1Name(JNIEnv *env, jclass obj, jlong face, jint glyphIndex) {
-	char* name[100];
+	char name[100];
 	FT_Get_Glyph_Name((FT_Face)face, glyphIndex, name, 100);
-	return env->NewStringUTF((const char*)name);
+	return (*env)->NewStringUTF(env, (const char*)name);
 }
 JNIEXPORT jstring JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1Postscript_1Name(JNIEnv *env, jclass obj, jlong face) {
-	return env->NewStringUTF(FT_Get_Postscript_Name((FT_Face)face));
+	return (*env)->NewStringUTF(env, FT_Get_Postscript_Name((FT_Face)face));
 }
 JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Select_1Charmap(JNIEnv *env, jclass obj, jlong face, jint encoding) {
 	return FT_Select_Charmap((FT_Face)face, (FT_Encoding)encoding);
@@ -349,9 +349,9 @@ JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1Ker
 		y = vector.y;
 	}
 	
-	jclass cls = env->FindClass("com/mlomb/freetypejni/Kerning");
-	jmethodID methodID = env->GetMethodID(cls, "<init>", "(II)V");
-	jobject a = env->NewObject(cls, methodID, x, y);
+	jclass cls = (*env)->FindClass(env, "com/mlomb/freetypejni/Kerning");
+	jmethodID methodID = (*env)->GetMethodID(env, cls, "<init>", "(II)V");
+	jobject a = (*env)->NewObject(env, cls, methodID, x, y);
 	return a;
 }
 /* --- COLRv1 color palette support --- */

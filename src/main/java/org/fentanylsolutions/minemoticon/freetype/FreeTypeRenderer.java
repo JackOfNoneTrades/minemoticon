@@ -201,18 +201,20 @@ public class FreeTypeRenderer implements AutoCloseable {
         String arch = System.getProperty("os.arch", "")
             .toLowerCase();
 
-        String platform;
-        String libName;
-        if (os.contains("mac")) {
-            platform = arch.contains("aarch64") || arch.contains("arm64") ? "macos-arm64" : "macos-x64";
-            libName = "libfreetype-jni.dylib";
-        } else if (os.contains("win")) {
-            platform = "windows-x64";
-            libName = "freetype-jni.dll";
-        } else {
-            platform = "linux-x64";
-            libName = "libfreetype-jni.so";
+        String normalizedArch = normalizeArch(arch);
+        if (normalizedArch == null) {
+            Minemoticon.LOG.warn("[FreeType] Unsupported architecture: {}", arch);
+            return false;
         }
+
+        String platform = detectPlatform(os, normalizedArch);
+        if (platform == null) {
+            Minemoticon.LOG.warn("[FreeType] Unsupported operating system: {}", os);
+            return false;
+        }
+
+        String libName = platform.startsWith("windows-") ? "freetype-jni.dll"
+            : platform.startsWith("macos-") ? "libfreetype-jni.dylib" : "libfreetype-jni.so";
 
         String resourcePath = "/natives/" + platform + "/" + libName;
 
@@ -241,6 +243,29 @@ public class FreeTypeRenderer implements AutoCloseable {
             Minemoticon.debug("Failed to load FreeType native: {}", e.getMessage());
             return false;
         }
+    }
+
+    private static String detectPlatform(String os, String arch) {
+        if (os.contains("mac")) {
+            return "macos-" + arch;
+        }
+        if (os.contains("win")) {
+            return "windows-" + arch;
+        }
+        if (os.contains("linux")) {
+            return "linux-" + arch;
+        }
+        return null;
+    }
+
+    private static String normalizeArch(String arch) {
+        if (arch.contains("aarch64") || arch.contains("arm64")) {
+            return "arm64";
+        }
+        if (arch.contains("amd64") || arch.contains("x86_64") || arch.contains("x64")) {
+            return "x64";
+        }
+        return null;
     }
 
     private LoadedGlyph loadGlyphBitmap(int codepoint, int size) {

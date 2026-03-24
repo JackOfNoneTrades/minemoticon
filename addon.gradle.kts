@@ -1,4 +1,8 @@
 tasks.withType<JavaExec>().configureEach {
+    if (name.startsWith("run")) {
+        dependsOn("buildFreetypeNatives")
+    }
+
     if (name.startsWith("runServer")) {
         // WawelAuth GUI stack is client-only. Strip these from dedicated-server
         // runtime right before launch (GTNH setup appends classpath later).
@@ -36,4 +40,67 @@ tasks.register<JavaExec>("renderEmojiFontHeadless") {
             listOf(fontPath, outputDir)
         }
     }
+}
+
+extensions.getByType(org.gradle.api.tasks.SourceSetContainer::class.java)
+    .named("main") {
+        java.srcDir("native/freetype-jni/freetype-jni")
+    }
+
+val configuredZigVersion = providers.gradleProperty("zigVersion")
+    .orElse("0.13.0")
+val defaultNativeTargets = providers.provider {
+    if (gradle.startParameter.taskNames.any { taskName ->
+            taskName == "build" || taskName == "assemble" || taskName == "jar" || taskName == "shadowJar" || taskName.endsWith("Jar") || taskName.startsWith("publish")
+        }) {
+        "all"
+    } else {
+        "host"
+    }
+}
+val configuredNativeTargets = providers.gradleProperty("nativeTargets")
+    .orElse(defaultNativeTargets)
+val nativeBuildScript = layout.projectDirectory.file("native/build-zig.sh")
+    .asFile.absolutePath
+val localZigRoot = layout.projectDirectory.dir("native/toolchains/zig")
+val generatedNativeResourcesRoot = layout.buildDirectory.dir("generated/freetype-resources")
+val generatedBundledNativeResources = generatedNativeResourcesRoot.map { it.dir("natives") }
+
+tasks.register<Exec>("setupLocalZig") {
+    group = "build setup"
+    description = "Download a project-local Zig toolchain for native builds."
+    workingDir = project.projectDir
+    environment("ZIG_VERSION", configuredZigVersion.get())
+    commandLine("bash", nativeBuildScript, "--setup-only")
+    inputs.file(nativeBuildScript)
+    inputs.property("zigVersion", configuredZigVersion)
+    outputs.dir(localZigRoot)
+}
+
+tasks.register<Exec>("buildFreetypeNatives") {
+    group = "build"
+    description = "Build bundled FreeType JNI natives for all supported platforms using the local Zig toolchain."
+    workingDir = project.projectDir
+    dependsOn("setupLocalZig")
+    environment("ZIG_VERSION", configuredZigVersion.get())
+    environment("NATIVE_RESOURCE_DIR", generatedBundledNativeResources.get().asFile.absolutePath)
+    commandLine("bash", nativeBuildScript, configuredNativeTargets.get())
+    inputs.file(nativeBuildScript)
+    inputs.file(layout.projectDirectory.file("native/freetype-jni/build.zig"))
+    inputs.file(layout.projectDirectory.file("native/freetype-jni/jni/freetype_jni.c"))
+    inputs.dir(layout.projectDirectory.dir("native/freetype-jni/freetype-jni"))
+    inputs.dir(layout.projectDirectory.dir("native/jni-headers"))
+    inputs.dir(layout.projectDirectory.dir("native/freetype-2.14.3"))
+    inputs.property("zigVersion", configuredZigVersion)
+    inputs.property("nativeTargets", configuredNativeTargets)
+    outputs.dir(generatedNativeResourcesRoot)
+}
+
+tasks.named("processResources", Copy::class).configure {
+    dependsOn("buildFreetypeNatives")
+    from(generatedNativeResourcesRoot)
+}
+
+tasks.named("jar").configure {
+    dependsOn("buildFreetypeNatives")
 }

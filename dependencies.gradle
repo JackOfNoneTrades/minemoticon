@@ -46,7 +46,6 @@ dependencies {
 
     shadowImplementation("com.github.weisj:jsvg:2.0.0")
     shadowImplementation("net.java.dev.jna:jna:5.9.0")
-    shadowImplementation(files("native/build/freetype-jni.jar"))
 
     devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:test4:dev")
     devOnlyNonPublishable("org.fentanylsolutions.tabfaces:TabFaces:b7968cf-snapshot")
