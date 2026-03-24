@@ -19,6 +19,10 @@ public class OTFTableReader {
         parseDirectory();
     }
 
+    public byte[] getFontData() {
+        return fontData;
+    }
+
     public static OTFTableReader load(InputStream in) throws IOException {
         var baos = new ByteArrayOutputStream();
         byte[] buf = new byte[8192];

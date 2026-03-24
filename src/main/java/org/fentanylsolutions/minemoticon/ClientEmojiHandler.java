@@ -303,7 +303,7 @@ public class ClientEmojiHandler {
 
             // First pass: collect glyph entries for atlas building
             var glyphEntries = new ArrayList<AtlasBuilder.GlyphEntry>();
-            boolean useAtlas = colorFont != null && fontHash != null;
+            boolean useAtlas = shouldUseAtlas();
 
             // Build atlas before creating emoji objects
             if (useAtlas) {
@@ -321,7 +321,7 @@ public class ClientEmojiHandler {
                     int[] codepoints = java.util.Arrays.stream(unified.split("-"))
                         .mapToInt(hex -> Integer.parseInt(hex, 16))
                         .toArray();
-                    if (codepoints.length > 0 && canRenderGlyph(codepoints)) {
+                    if (codepoints.length > 0 && pickFontForGlyph(codepoints) != null) {
                         glyphEntries.add(new AtlasBuilder.GlyphEntry(unified, codepoints));
                     }
                 }
@@ -355,8 +355,13 @@ public class ClientEmojiHandler {
                     .mapToInt(hex -> Integer.parseInt(hex, 16))
                     .toArray();
 
+                ColorFont renderFont = codepoints.length > 0 ? pickFontForGlyph(codepoints) : null;
+                ColorFont primaryFont = codepoints.length > 0 ? pickPrimaryFontForGlyph(codepoints) : null;
+                ColorFont fallbackFont = codepoints.length > 0 ? pickFallbackFontForGlyph(codepoints, primaryFont)
+                    : null;
+
                 Emoji emoji;
-                if (useAtlas && codepoints.length > 0 && canRenderGlyph(codepoints)) {
+                if (useAtlas && renderFont != null) {
                     var atlasEmoji = new EmojiFromAtlas(emojiAtlas, unified);
                     atlasEmoji.name = emojiName;
                     atlasEmoji.location = location;
@@ -364,6 +369,21 @@ public class ClientEmojiHandler {
                     atlasEmoji.category = category;
                     atlasEmoji.unicodeString = unicodeStr;
                     emoji = atlasEmoji;
+                } else if (primaryFont != null || fallbackFont != null) {
+                    var cdnFallback = new EmojiFromTwitmoji();
+                    cdnFallback.name = emojiName;
+                    cdnFallback.location = location;
+                    cdnFallback.sort = sort;
+                    cdnFallback.category = category;
+                    cdnFallback.unicodeString = unicodeStr;
+
+                    var fontEmoji = new EmojiFromFont(primaryFont, fallbackFont, cdnFallback, codepoints);
+                    fontEmoji.name = emojiName;
+                    fontEmoji.location = location;
+                    fontEmoji.sort = sort;
+                    fontEmoji.category = category;
+                    fontEmoji.unicodeString = unicodeStr;
+                    emoji = fontEmoji;
                 } else {
                     var cdnEmoji = new EmojiFromTwitmoji();
                     cdnEmoji.name = emojiName;
@@ -416,10 +436,31 @@ public class ClientEmojiHandler {
         }
     }
 
+    private static boolean shouldUseAtlas() {
+        if (colorFont == null || fontHash == null) return false;
+        // Custom fonts are routed through per-glyph textures for compatibility.
+        return EmojiConfig.emojiFont == null || EmojiConfig.emojiFont.isEmpty();
+    }
+
+    private static ColorFont pickFontForGlyph(int[] codepoints) {
+        if (colorFont != null && colorFont.canRender(codepoints)) return colorFont;
+        if (bundledFont != null && bundledFont != colorFont && bundledFont.canRender(codepoints)) return bundledFont;
+        return null;
+    }
+
+    private static ColorFont pickPrimaryFontForGlyph(int[] codepoints) {
+        if (colorFont != null && colorFont.canRender(codepoints)) return colorFont;
+        if (bundledFont != null && bundledFont.canRender(codepoints)) return bundledFont;
+        return null;
+    }
+
+    private static ColorFont pickFallbackFontForGlyph(int[] codepoints, ColorFont primaryFont) {
+        if (bundledFont != null && bundledFont != primaryFont && bundledFont.canRender(codepoints)) return bundledFont;
+        return null;
+    }
+
     private static boolean canRenderGlyph(int[] codepoints) {
-        if (colorFont != null && colorFont.canRender(codepoints)) return true;
-        if (bundledFont != null && bundledFont != colorFont && bundledFont.canRender(codepoints)) return true;
-        return false;
+        return pickFontForGlyph(codepoints) != null;
     }
 
     private static boolean isStockEmoji(Emoji e) {

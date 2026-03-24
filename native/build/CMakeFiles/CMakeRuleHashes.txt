@@ -1,0 +1,2 @@
+# Hashes of file build rules.
+f0b039c54ca006ae370d7e81bc9e541b CMakeFiles/freetype-jni-headers

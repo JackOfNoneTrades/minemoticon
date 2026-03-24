@@ -8,12 +8,12 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 
 import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.client.resources.IResourceManager;
 
 import org.fentanylsolutions.fentlib.util.QoiUtil;
 import org.fentanylsolutions.fentlib.util.WebpUtil;
 import org.fentanylsolutions.minemoticon.Minemoticon;
+import org.fentanylsolutions.minemoticon.render.EmojiTextureUtil;
 
 // Loads an image from a local file and uploads to GL lazily.
 // Supports PNG, JPG, QOI, and WebP.
@@ -47,7 +47,7 @@ public class FileTexture extends AbstractTexture {
         int id = super.getGlTextureId();
         BufferedImage img = pendingImage.getAndSet(null);
         if (img != null) {
-            TextureUtil.uploadTextureImageAllocate(id, img, false, false);
+            EmojiTextureUtil.uploadFilteredTexture(id, img);
             uploaded = true;
         }
         return id;

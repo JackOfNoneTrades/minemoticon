@@ -1,0 +1,1 @@
+/usr/bin/c++ -O3 -DNDEBUG -arch arm64 -dynamiclib -Wl,-headerpad_max_install_names -o libfreetype-jni.dylib -install_name @rpath/libfreetype-jni.dylib "CMakeFiles/freetype-jni.dir/jni/freetype_jni.cpp.o"  freetype2/libfreetype.a

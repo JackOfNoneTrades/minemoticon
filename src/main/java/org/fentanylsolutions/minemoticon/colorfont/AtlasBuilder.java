@@ -22,7 +22,7 @@ import com.google.gson.JsonParser;
 public class AtlasBuilder {
 
     private static final File CACHE_DIR = new File("config/minemoticon/cache");
-    private static final String ATLAS_RENDER_VERSION = "v4";
+    private static final String ATLAS_RENDER_VERSION = "v5";
     private static final int CELL_SIZE = 128;
     private static final int RENDER_SIZE = 256; // 2x supersample
     private static final int COLS = 48;

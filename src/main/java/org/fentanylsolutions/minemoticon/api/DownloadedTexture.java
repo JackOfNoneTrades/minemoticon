@@ -17,12 +17,12 @@ import javax.imageio.ImageIO;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.client.resources.IResourceManager;
 
 import org.apache.commons.io.FileUtils;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
+import org.fentanylsolutions.minemoticon.render.EmojiTextureUtil;
 
 // Downloads an image from a URL, caches to disk, and uploads to GL on next bind.
 public class DownloadedTexture extends AbstractTexture {
@@ -83,7 +83,7 @@ public class DownloadedTexture extends AbstractTexture {
         int id = super.getGlTextureId();
         BufferedImage img = pendingImage.getAndSet(null);
         if (img != null) {
-            TextureUtil.uploadTextureImageAllocate(id, img, false, false);
+            EmojiTextureUtil.uploadFilteredTexture(id, img);
             uploaded = true;
         }
         return id;

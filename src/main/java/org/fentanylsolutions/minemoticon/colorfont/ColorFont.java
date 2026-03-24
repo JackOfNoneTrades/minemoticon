@@ -19,21 +19,24 @@ public class ColorFont {
     private final CmapParser cmap;
     private final ColrParser colr;
     private final CpalParser cpal;
-    private final GlyfParser glyf; // null if no glyf table (CBDT-only fonts)
+    private final GlyfParser glyf; // null if no glyf table
     private final CbdtParser cbdt; // null if no CBDT table
     private final SvgParser svg; // null if no SVG table
+    private final org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype; // null if FreeType unavailable
     private final int unitsPerEm;
     private final int ascent;
     private final int descent;
 
     private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, CbdtParser cbdt,
-        SvgParser svg, int unitsPerEm, int ascent, int descent) {
+        SvgParser svg, org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype, int unitsPerEm, int ascent,
+        int descent) {
         this.cmap = cmap;
         this.colr = colr;
         this.cpal = cpal;
         this.glyf = glyf;
         this.cbdt = cbdt;
         this.svg = svg;
+        this.freetype = freetype;
         this.unitsPerEm = unitsPerEm;
         this.ascent = ascent;
         this.descent = descent;
@@ -45,17 +48,26 @@ public class ColorFont {
         if (!reader.hasTable("cmap")) {
             throw new IOException("Font missing cmap table");
         }
+
+        // FreeType can handle formats we don't parse directly (for example some
+        // color-only fonts), so load it before rejecting the font as unsupported.
+        var ftRenderer = org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer.load(reader.getFontData());
+
         boolean hasGlyf = reader.hasTable("glyf") && reader.hasTable("loca");
         boolean hasCbdt = reader.hasTable("CBDT") && reader.hasTable("CBLC");
         boolean hasSvg = reader.hasTable("SVG ");
 
-        if (!hasGlyf && !hasCbdt && !hasSvg) {
-            throw new IOException("Font has no renderable glyph data (needs glyf, CBDT, or SVG)");
+        if (!hasGlyf && !hasCbdt && !hasSvg && ftRenderer == null) {
+            throw new IOException("Font has no renderable glyph data (needs glyf, CBDT, SVG, or FreeType support)");
         }
 
         var head = new HeadParser(reader.getTable("head"));
         var maxp = new MaxpParser(reader.getTable("maxp"));
         var cmapTable = new CmapParser(reader.getTable("cmap"));
+
+        if (reader.hasTable("hhea")) {
+            head.parseHhea(reader.getTable("hhea"));
+        }
 
         // glyf/loca for outline rendering
         GlyfParser glyfTable = null;
@@ -87,10 +99,6 @@ public class ColorFont {
             svgTable = new SvgParser(reader.getTable("SVG "), head.unitsPerEm, head.ascent, head.descent);
         }
 
-        if (reader.hasTable("hhea")) {
-            head.parseHhea(reader.getTable("hhea"));
-        }
-
         return new ColorFont(
             cmapTable,
             colrTable,
@@ -98,6 +106,7 @@ public class ColorFont {
             glyfTable,
             cbdtTable,
             svgTable,
+            ftRenderer,
             head.unitsPerEm,
             head.ascent,
             head.descent);
@@ -108,6 +117,13 @@ public class ColorFont {
         if (cbdt != null && cbdt.getGlyphCount() > 0) return true;
         if (svg != null && svg.getGlyphCount() > 0) return true;
         return false;
+    }
+
+    public String debugPreparedSvg(int codepoint) {
+        if (svg == null) return null;
+        int glyphId = cmap.getGlyphId(codepoint);
+        if (glyphId == 0 || !svg.hasSvg(glyphId)) return null;
+        return svg.debugPrepareSvg(glyphId);
     }
 
     // Check if a multi-codepoint sequence can be rendered
@@ -127,26 +143,47 @@ public class ColorFont {
 
     public boolean hasGlyph(int codepoint) {
         int glyphId = cmap.getGlyphId(codepoint);
-        if (glyphId == 0) return false;
+        if (glyphId == 0) {
+            // cmap miss -- FreeType might still have it via GSUB or other tables
+            return freetype != null && freetype.canRenderGlyph(codepoint);
+        }
         if (cbdt != null && cbdt.hasBitmap(glyphId)) return true;
         if (svg != null && svg.hasSvg(glyphId)) return true;
         if (colr.hasLayers(glyphId)) return true;
-        return glyf != null && glyf.hasOutline(glyphId);
+        if (glyf != null && glyf.hasOutline(glyphId)) return true;
+        // Last resort: FreeType for COLRv1 and other formats we can't parse
+        return freetype != null && freetype.canRenderGlyph(codepoint);
     }
 
     // Render a single-codepoint emoji to a BufferedImage at the given pixel size.
     public BufferedImage renderGlyph(int codepoint, int size) {
         int glyphId = cmap.getGlyphId(codepoint);
-        if (glyphId == 0) return null;
 
-        // Priority: CBDT bitmap > SVG > COLR v0 > monochrome glyf
-        if (cbdt != null && cbdt.hasBitmap(glyphId)) {
+        // Priority: CBDT > SVG > COLR v0 > FreeType (COLRv1) > monochrome glyf
+        if (glyphId != 0 && cbdt != null && cbdt.hasBitmap(glyphId)) {
             return scaleBitmap(cbdt.getBitmap(glyphId), size);
         }
-        if (svg != null && svg.hasSvg(glyphId)) {
+        if (glyphId != 0 && svg != null && svg.hasSvg(glyphId)) {
             return svg.renderGlyph(glyphId, size);
         }
-        return renderGlyphById(glyphId, size);
+
+        // COLR v0 (our custom renderer)
+        if (glyphId != 0 && colr.hasLayers(glyphId)) {
+            return renderGlyphById(glyphId, size);
+        }
+
+        // FreeType fallback for COLRv1 and other formats we can't parse natively
+        if (freetype != null) {
+            var ftImg = freetype.renderGlyph(codepoint, size);
+            if (ftImg != null) return ftImg;
+        }
+
+        // Monochrome glyf outlines as last resort
+        if (glyphId != 0) {
+            return renderGlyphById(glyphId, size);
+        }
+
+        return null;
     }
 
     // Render a multi-codepoint emoji (ZWJ sequences, flags, etc.).

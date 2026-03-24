@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/jack/Projects/Modding/minemoticon/native/build/cmake_install.cmake",
+		"/Users/jack/Projects/Modding/minemoticon/native/build/freetype2/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

@@ -6,8 +6,9 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.client.resources.IResourceManager;
+
+import org.fentanylsolutions.minemoticon.render.EmojiTextureUtil;
 
 // Holds a single atlas texture with UV lookup for all glyphs.
 // Shared by all EmojiFromAtlas instances for a given font.
@@ -66,7 +67,7 @@ public class EmojiAtlas {
             int id = super.getGlTextureId();
             BufferedImage img = pendingImage.getAndSet(null);
             if (img != null) {
-                TextureUtil.uploadTextureImageAllocate(id, img, true, false);
+                EmojiTextureUtil.uploadFilteredTexture(id, img);
                 uploaded = true;
             }
             return id;

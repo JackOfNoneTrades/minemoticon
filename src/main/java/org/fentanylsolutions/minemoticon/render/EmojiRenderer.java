@@ -87,6 +87,11 @@ public class EmojiRenderer {
             .getTextureManager()
             .bindTexture(texLoc);
 
+        boolean blendWasEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
+        if (!blendWasEnabled) {
+            GL11.glEnable(GL11.GL_BLEND);
+        }
+        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
         GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
 
         float[] uv = emoji.getUV();
@@ -106,5 +111,9 @@ public class EmojiRenderer {
         GL11.glTexCoord2f(u1, v1);
         GL11.glVertex3f(x + EMOJI_SIZE, top + EMOJI_SIZE, 0);
         GL11.glEnd();
+
+        if (!blendWasEnabled) {
+            GL11.glDisable(GL11.GL_BLEND);
+        }
     }
 }

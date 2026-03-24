@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.texture.AbstractTexture;
-import net.minecraft.client.renderer.texture.TextureUtil;
 import net.minecraft.client.resources.IResourceManager;
 import net.minecraft.util.ResourceLocation;
 
@@ -24,6 +23,7 @@ import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.api.DownloadedTexture;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
+import org.fentanylsolutions.minemoticon.render.EmojiTextureUtil;
 import org.lwjgl.opengl.GL11;
 
 // Lists TTFs in the fonts dir with emoji preview strips.
@@ -282,7 +282,7 @@ public class FontSelectionScreen extends GuiScreen {
             int id = super.getGlTextureId();
             var img = pending.getAndSet(null);
             if (img != null) {
-                TextureUtil.uploadTextureImageAllocate(id, img, false, false);
+                EmojiTextureUtil.uploadFilteredTexture(id, img);
                 ready = true;
             }
             return id;
