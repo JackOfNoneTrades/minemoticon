@@ -38,6 +38,20 @@ public class AtlasBuilder {
         }
     }
 
+    // Delete atlas cache files that don't match the current font hash
+    public static void cleanStaleCaches(String currentFontHash) {
+        CACHE_DIR.mkdirs();
+        String currentPrefix = "atlas_" + currentFontHash + "_";
+        File[] files = CACHE_DIR.listFiles((d, name) -> name.startsWith("atlas_") && !name.startsWith(currentPrefix));
+        if (files != null) {
+            for (File f : files) {
+                if (f.delete()) {
+                    Minemoticon.debug("Deleted stale atlas cache: {}", f.getName());
+                }
+            }
+        }
+    }
+
     // Try loading cached atlas, or start building in background. Returns the atlas immediately.
     public static EmojiAtlas loadOrBuild(ColorFont primaryFont, ColorFont fallbackFont, String fontHash,
         List<GlyphEntry> glyphs) {

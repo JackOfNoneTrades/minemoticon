@@ -65,6 +65,11 @@ public class ClientEmojiHandler {
         // Load color font for stock emoji rendering
         loadColorFont();
 
+        // Clean stale atlas caches from previous font versions
+        if (fontHash != null) {
+            AtlasBuilder.cleanStaleCaches(fontHash);
+        }
+
         // Load packs synchronously (local files, fast)
         loadPacks();
 

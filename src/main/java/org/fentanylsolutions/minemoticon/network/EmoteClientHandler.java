@@ -154,6 +154,20 @@ public class EmoteClientHandler {
         pendingIsIcon.clear();
         pendingNamespaces.clear();
         clearRemoteEmojis();
+        clearEmoteDiskCache();
+    }
+
+    private static void clearEmoteDiskCache() {
+        if (!CACHE_DIR.isDirectory()) return;
+        File[] files = CACHE_DIR.listFiles();
+        if (files == null) return;
+        int count = 0;
+        for (File f : files) {
+            if (f.isFile() && f.delete()) count++;
+        }
+        if (count > 0) {
+            Minemoticon.debug("Cleared {} emote cache files", count);
+        }
     }
 
     public static void clearRemoteEmojis() {
