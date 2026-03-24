@@ -66,7 +66,7 @@ public class EmojiAtlas {
             int id = super.getGlTextureId();
             BufferedImage img = pendingImage.getAndSet(null);
             if (img != null) {
-                TextureUtil.uploadTextureImageAllocate(id, img, false, false);
+                TextureUtil.uploadTextureImageAllocate(id, img, true, false);
                 uploaded = true;
             }
             return id;

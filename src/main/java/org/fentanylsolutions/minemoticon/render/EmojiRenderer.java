@@ -12,7 +12,7 @@ import org.lwjgl.opengl.GL11;
 
 public class EmojiRenderer {
 
-    public static final float EMOJI_SIZE = 9.0f;
+    public static final float EMOJI_SIZE = 10.0f;
 
     // When true, parse() returns null unconditionally. Used by the picker
     // info bar to render :colon: text without the font mixin replacing it.

@@ -22,6 +22,7 @@ import com.google.gson.JsonParser;
 public class AtlasBuilder {
 
     private static final File CACHE_DIR = new File("config/minemoticon/cache");
+    private static final String ATLAS_RENDER_VERSION = "v4";
     private static final int CELL_SIZE = 128;
     private static final int RENDER_SIZE = 256; // 2x supersample
     private static final int COLS = 48;
@@ -42,8 +43,9 @@ public class AtlasBuilder {
         var atlas = new EmojiAtlas();
         CACHE_DIR.mkdirs();
 
-        File pngFile = new File(CACHE_DIR, "atlas_" + fontHash + ".png");
-        File jsonFile = new File(CACHE_DIR, "atlas_" + fontHash + ".json");
+        String atlasKey = fontHash + "_" + ATLAS_RENDER_VERSION;
+        File pngFile = new File(CACHE_DIR, "atlas_" + atlasKey + ".png");
+        File jsonFile = new File(CACHE_DIR, "atlas_" + atlasKey + ".json");
 
         if (pngFile.isFile() && jsonFile.isFile()) {
             // Load cached atlas on background thread
@@ -84,8 +86,13 @@ public class AtlasBuilder {
 
             var atlasImg = new BufferedImage(atlasW, atlasH, BufferedImage.TYPE_INT_ARGB);
             var g2d = atlasImg.createGraphics();
-            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2d.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2d.setRenderingHint(
+                RenderingHints.KEY_ALPHA_INTERPOLATION,
+                RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+            g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
+            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 
             Map<String, float[]> uvs = new HashMap<>();
             Map<String, int[]> pixelCoords = new HashMap<>(); // for JSON cache
@@ -110,12 +117,24 @@ public class AtlasBuilder {
                     g2d.drawImage(glyph, px, py, CELL_SIZE, CELL_SIZE, null);
                 }
 
-                float u0 = (float) px / atlasW;
-                float v0 = (float) py / atlasH;
-                float u1 = (float) (px + CELL_SIZE) / atlasW;
-                float v1 = (float) (py + CELL_SIZE) / atlasH;
+                int[] visibleBounds = glyph != null ? computeVisibleBounds(glyph) : null;
+                int uvPx = px;
+                int uvPy = py;
+                int uvW = CELL_SIZE;
+                int uvH = CELL_SIZE;
+                if (visibleBounds != null) {
+                    uvPx += visibleBounds[0];
+                    uvPy += visibleBounds[1];
+                    uvW = visibleBounds[2];
+                    uvH = visibleBounds[3];
+                }
+
+                float u0 = (float) uvPx / atlasW;
+                float v0 = (float) uvPy / atlasH;
+                float u1 = (float) (uvPx + uvW) / atlasW;
+                float v1 = (float) (uvPy + uvH) / atlasH;
                 uvs.put(entry.unified, new float[] { u0, v0, u1, v1 });
-                pixelCoords.put(entry.unified, new int[] { px, py, CELL_SIZE, CELL_SIZE });
+                pixelCoords.put(entry.unified, new int[] { uvPx, uvPy, uvW, uvH });
             }
 
             g2d.dispose();
@@ -181,5 +200,45 @@ public class AtlasBuilder {
         } catch (Exception e) {
             return "unknown";
         }
+    }
+
+    private static int[] computeVisibleBounds(BufferedImage glyph) {
+        int width = glyph.getWidth();
+        int height = glyph.getHeight();
+        int minX = width;
+        int minY = height;
+        int maxX = -1;
+        int maxY = -1;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                if (((glyph.getRGB(x, y) >>> 24) & 0xFF) == 0) continue;
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+
+        if (maxX < minX || maxY < minY) {
+            return null;
+        }
+
+        // Keep a little transparent border so antialiased edges don't get clipped.
+        int pad = Math.max(1, width / 64);
+        minX = Math.max(0, minX - pad);
+        minY = Math.max(0, minY - pad);
+        maxX = Math.min(width - 1, maxX + pad);
+        maxY = Math.min(height - 1, maxY + pad);
+
+        double scaleX = (double) CELL_SIZE / width;
+        double scaleY = (double) CELL_SIZE / height;
+        int scaledMinX = Math.max(0, (int) Math.floor(minX * scaleX));
+        int scaledMinY = Math.max(0, (int) Math.floor(minY * scaleY));
+        int scaledMaxX = Math.min(CELL_SIZE - 1, (int) Math.ceil((maxX + 1) * scaleX) - 1);
+        int scaledMaxY = Math.min(CELL_SIZE - 1, (int) Math.ceil((maxY + 1) * scaleY) - 1);
+
+        return new int[] { scaledMinX, scaledMinY, Math.max(1, scaledMaxX - scaledMinX + 1),
+            Math.max(1, scaledMaxY - scaledMinY + 1) };
     }
 }

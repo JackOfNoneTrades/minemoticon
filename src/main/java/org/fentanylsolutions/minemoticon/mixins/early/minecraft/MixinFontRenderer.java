@@ -15,6 +15,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(FontRenderer.class)
 public abstract class MixinFontRenderer {
 
+    @Unique
+    private static final float minemoticon$INLINE_EMOJI_Y_OFFSET = -(EmojiRenderer.EMOJI_SIZE - 8.0f) / 2.0f;
+
     @Shadow
     private float posX;
 
@@ -84,7 +87,7 @@ public abstract class MixinFontRenderer {
             for (var seg : segments) {
                 if (seg instanceof RenderableEmoji emoji) {
                     if (!shadow) {
-                        EmojiRenderer.renderQuad(emoji, this.posX, this.posY);
+                        EmojiRenderer.renderQuad(emoji, this.posX, this.posY + minemoticon$INLINE_EMOJI_Y_OFFSET);
                         // Restore font color after emoji quad reset it to white
                         org.lwjgl.opengl.GL11.glColor4f(this.red, this.green, this.blue, this.alpha);
                     }

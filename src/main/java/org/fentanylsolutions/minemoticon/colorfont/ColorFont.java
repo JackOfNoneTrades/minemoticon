@@ -1,12 +1,16 @@
 package org.fentanylsolutions.minemoticon.colorfont;
 
 import java.awt.Color;
+import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.GeneralPath;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 // Renders colored emoji glyphs from a COLR/CPAL OpenType font.
 // Self-contained, no Minecraft dependencies -- can be moved to a library.
@@ -17,13 +21,18 @@ public class ColorFont {
     private final CpalParser cpal;
     private final GlyfParser glyf;
     private final int unitsPerEm;
+    private final int ascent;
+    private final int descent;
 
-    private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, int unitsPerEm) {
+    private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, int unitsPerEm, int ascent,
+        int descent) {
         this.cmap = cmap;
         this.colr = colr;
         this.cpal = cpal;
         this.glyf = glyf;
         this.unitsPerEm = unitsPerEm;
+        this.ascent = ascent;
+        this.descent = descent;
     }
 
     public static ColorFont load(InputStream in) throws IOException {
@@ -41,7 +50,11 @@ public class ColorFont {
         var cpalTable = new CpalParser(reader.getTable("CPAL"));
         var glyfTable = new GlyfParser(reader.getTable("glyf"), loca);
 
-        return new ColorFont(cmapTable, colrTable, cpalTable, glyfTable, head.unitsPerEm);
+        if (reader.hasTable("hhea")) {
+            head.parseHhea(reader.getTable("hhea"));
+        }
+
+        return new ColorFont(cmapTable, colrTable, cpalTable, glyfTable, head.unitsPerEm, head.ascent, head.descent);
     }
 
     public boolean hasGlyph(int codepoint) {
@@ -78,90 +91,89 @@ public class ColorFont {
     }
 
     private BufferedImage renderGlyphById(int glyphId, int size) {
-        // Render at 2x for better anti-aliasing, then downsample
-        int renderSize = size * 2;
+        // Render at 4x for high quality, downsample to target
+        int renderSize = size * 4;
         var img = new BufferedImage(renderSize, renderSize, BufferedImage.TYPE_INT_ARGB);
         var g2d = img.createGraphics();
-        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
-        g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+        applyQualityHints(g2d);
 
-        // First pass: collect all layer outlines to compute the combined bounding box
-        var allOutlines = new java.util.ArrayList<GeneralPath>();
-        var layers = colr.getLayers(glyphId);
-        if (layers != null) {
-            for (var layer : layers) {
-                GeneralPath outline = glyf.getOutline(layer.glyphId);
-                if (outline != null) allOutlines.add(outline);
-            }
-        } else {
-            GeneralPath outline = glyf.getOutline(glyphId);
-            if (outline != null) allOutlines.add(outline);
-        }
-
-        if (allOutlines.isEmpty()) {
+        var outlines = new ArrayList<GeneralPath>();
+        var colors = new ArrayList<Color>();
+        Rectangle2D bounds = collectGlyphLayers(glyphId, outlines, colors);
+        if (bounds == null || bounds.isEmpty() || bounds.getWidth() <= 0 || bounds.getHeight() <= 0) {
             g2d.dispose();
-            return img;
+            return null;
         }
 
-        // Compute combined bounds in font units
-        var bounds = allOutlines.get(0)
-            .getBounds2D();
-        for (int i = 1; i < allOutlines.size(); i++) {
-            bounds = bounds.createUnion(
-                allOutlines.get(i)
-                    .getBounds2D());
-        }
+        float pad = renderSize * 0.06f;
+        double availW = renderSize - pad * 2.0;
+        double availH = renderSize - pad * 2.0;
+        double scale = Math.min(availW / bounds.getWidth(), availH / bounds.getHeight());
 
-        // Scale to fit the image with padding
-        float pad = renderSize * 0.04f;
-        float availSize = renderSize - pad * 2;
-        float glyphW = (float) bounds.getWidth();
-        float glyphH = (float) bounds.getHeight();
-        if (glyphW <= 0 || glyphH <= 0) {
-            g2d.dispose();
-            return img;
-        }
-
-        float scale = availSize / Math.max(glyphW, glyphH);
-        float offsetX = pad + (availSize - glyphW * scale) / 2 - (float) bounds.getX() * scale;
-        float offsetY = pad + (availSize - glyphH * scale) / 2 + (float) (bounds.getY() + glyphH) * scale;
-
-        // Transform: scale and flip Y, then center in image
         var transform = new AffineTransform();
-        transform.translate(offsetX, offsetY);
+        double xShift = pad + (availW - bounds.getWidth() * scale) / 2.0 - bounds.getX() * scale;
+        double yShift = pad + (availH - bounds.getHeight() * scale) / 2.0 + bounds.getMaxY() * scale;
+        transform.translate(xShift, yShift);
         transform.scale(scale, -scale);
 
-        // Second pass: render
-        if (layers != null) {
-            int outlineIdx = 0;
-            for (var layer : layers) {
-                GeneralPath outline = glyf.getOutline(layer.glyphId);
-                if (outline == null) continue;
-                GeneralPath scaled = (GeneralPath) outline.clone();
-                scaled.transform(transform);
-                int argb = cpal.getColor(layer.paletteIndex);
-                g2d.setColor(new Color(argb, true));
-                g2d.fill(scaled);
-            }
-        } else {
-            GeneralPath scaled = (GeneralPath) allOutlines.get(0)
-                .clone();
-            scaled.transform(transform);
-            g2d.setColor(Color.BLACK);
+        for (int i = 0; i < outlines.size(); i++) {
+            var scaled = transform.createTransformedShape(outlines.get(i));
+            g2d.setColor(colors.get(i));
             g2d.fill(scaled);
         }
 
         g2d.dispose();
 
-        // Downsample from 2x to target size for smooth edges
+        // Downsample to target size with high quality interpolation
         var result = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
         var rg = result.createGraphics();
-        rg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-        rg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        applyQualityHints(rg);
+        rg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
         rg.drawImage(img, 0, 0, size, size, null);
         rg.dispose();
         return result;
+    }
+
+    private Rectangle2D collectGlyphLayers(int glyphId, List<GeneralPath> outlines, List<Color> colors) {
+        Rectangle2D bounds = null;
+        var layers = colr.getLayers(glyphId);
+        if (layers != null) {
+            for (var layer : layers) {
+                GeneralPath outline = glyf.getOutline(layer.glyphId);
+                if (outline == null || outline.getCurrentPoint() == null) continue;
+                Rectangle2D outlineBounds = outline.getBounds2D();
+                if (outlineBounds.isEmpty()) continue;
+                outlines.add(outline);
+                colors.add(new Color(cpal.getColor(layer.paletteIndex), true));
+                bounds = unionBounds(bounds, outlineBounds);
+            }
+        } else {
+            GeneralPath outline = glyf.getOutline(glyphId);
+            if (outline != null && outline.getCurrentPoint() != null) {
+                Rectangle2D outlineBounds = outline.getBounds2D();
+                if (!outlineBounds.isEmpty()) {
+                    outlines.add(outline);
+                    colors.add(Color.BLACK);
+                    bounds = unionBounds(bounds, outlineBounds);
+                }
+            }
+        }
+        return bounds;
+    }
+
+    private Rectangle2D unionBounds(Rectangle2D current, Rectangle2D next) {
+        if (current == null) {
+            return (Rectangle2D) next.clone();
+        }
+        Rectangle2D.union(current, next, current);
+        return current;
+    }
+
+    private void applyQualityHints(Graphics2D g2d) {
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
     }
 }

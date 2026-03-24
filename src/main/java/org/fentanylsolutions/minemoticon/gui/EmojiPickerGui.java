@@ -407,6 +407,7 @@ public class EmojiPickerGui {
 
     private void renderButtonEmoji(int mouseX, int mouseY) {
         var texLoc = buttonEmoji.getResourceLocation();
+        if (texLoc == null) return;
         Minecraft.getMinecraft()
             .getTextureManager()
             .bindTexture(texLoc);
@@ -415,16 +416,22 @@ public class EmojiPickerGui {
         float brightness = hovered || open ? 0.9f : 0.6f;
         GL11.glColor4f(brightness, brightness, brightness, 1.0f);
 
+        float[] uv = buttonEmoji.getUV();
+        float u0 = uv != null ? uv[0] : 0;
+        float v0 = uv != null ? uv[1] : 0;
+        float u1 = uv != null ? uv[2] : 1;
+        float v1 = uv != null ? uv[3] : 1;
+
         float size = EmojiRenderer.EMOJI_SIZE;
         float top = buttonY - 1.0f;
         GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-        GL11.glTexCoord2f(0, 0);
+        GL11.glTexCoord2f(u0, v0);
         GL11.glVertex3f(buttonX, top, 0);
-        GL11.glTexCoord2f(0, 1);
+        GL11.glTexCoord2f(u0, v1);
         GL11.glVertex3f(buttonX, top + size, 0);
-        GL11.glTexCoord2f(1, 0);
+        GL11.glTexCoord2f(u1, v0);
         GL11.glVertex3f(buttonX + size, top, 0);
-        GL11.glTexCoord2f(1, 1);
+        GL11.glTexCoord2f(u1, v1);
         GL11.glVertex3f(buttonX + size, top + size, 0);
         GL11.glEnd();
 

@@ -4,6 +4,8 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.GeneralPath;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.List;
 
 // Parses glyf table entries into GeneralPath outlines.
 public class GlyfParser {
@@ -111,72 +113,52 @@ public class GlyfParser {
     private void buildContour(GeneralPath path, int[] xCoords, int[] yCoords, int[] flags, int start, int end) {
         int count = end - start + 1;
         if (count < 2) return;
-
-        // Find the first on-curve point to start from
-        int firstOnCurve = -1;
+        List<ContourPoint> expanded = new ArrayList<>(count * 2);
         for (int i = start; i <= end; i++) {
-            if ((flags[i] & 0x01) != 0) {
-                firstOnCurve = i;
-                break;
-            }
-        }
+            ContourPoint current = new ContourPoint(xCoords[i], yCoords[i], (flags[i] & 0x01) != 0);
+            expanded.add(current);
 
-        float startX, startY;
-        int startIdx;
-        if (firstOnCurve >= 0) {
-            startX = xCoords[firstOnCurve];
-            startY = yCoords[firstOnCurve];
-            startIdx = firstOnCurve;
-        } else {
-            // All off-curve: start at midpoint between first two
-            startX = (xCoords[start] + xCoords[start + 1]) / 2.0f;
-            startY = (yCoords[start] + yCoords[start + 1]) / 2.0f;
-            startIdx = start;
-        }
-
-        path.moveTo(startX, startY);
-
-        int i = startIdx;
-        for (int step = 0; step < count; step++) {
-            int next = start + ((i - start + 1) % count);
-            boolean curOnCurve = (flags[i] & 0x01) != 0;
+            int next = i == end ? start : i + 1;
             boolean nextOnCurve = (flags[next] & 0x01) != 0;
-
-            if (curOnCurve && nextOnCurve) {
-                path.lineTo(xCoords[next], yCoords[next]);
-            } else if (curOnCurve && !nextOnCurve) {
-                // Current is on-curve, next is off-curve
-                int afterNext = start + ((next - start + 1) % count);
-                boolean afterOnCurve = (flags[afterNext] & 0x01) != 0;
-                float endX, endY;
-                if (afterOnCurve) {
-                    endX = xCoords[afterNext];
-                    endY = yCoords[afterNext];
-                } else {
-                    // Implied on-curve point between two off-curve
-                    endX = (xCoords[next] + xCoords[afterNext]) / 2.0f;
-                    endY = (yCoords[next] + yCoords[afterNext]) / 2.0f;
-                }
-                path.quadTo(xCoords[next], yCoords[next], endX, endY);
-                i = next;
-                continue; // don't advance again
-            } else if (!curOnCurve) {
-                // Off-curve to next
-                float endX, endY;
-                if (nextOnCurve) {
-                    endX = xCoords[next];
-                    endY = yCoords[next];
-                } else {
-                    endX = (xCoords[i] + xCoords[next]) / 2.0f;
-                    endY = (yCoords[i] + yCoords[next]) / 2.0f;
-                }
-                path.quadTo(xCoords[i], yCoords[i], endX, endY);
+            if (!current.onCurve && !nextOnCurve) {
+                expanded.add(midpoint(current, new ContourPoint(xCoords[next], yCoords[next], false)));
             }
+        }
 
-            i = next;
+        int startIndex = 0;
+        while (startIndex < expanded.size() && !expanded.get(startIndex).onCurve) {
+            startIndex++;
+        }
+        if (startIndex >= expanded.size()) {
+            return;
+        }
+
+        List<ContourPoint> ordered = new ArrayList<>(expanded.size() + 1);
+        for (int i = 0; i < expanded.size(); i++) {
+            ordered.add(expanded.get((startIndex + i) % expanded.size()));
+        }
+        if (!ordered.get(ordered.size() - 1).onCurve) {
+            ordered.add(ordered.get(0));
+        }
+
+        path.moveTo(ordered.get(0).x, ordered.get(0).y);
+        for (int i = 1; i < ordered.size();) {
+            ContourPoint point = ordered.get(i);
+            if (point.onCurve) {
+                path.lineTo(point.x, point.y);
+                i++;
+            } else {
+                ContourPoint next = ordered.get(i + 1);
+                path.quadTo(point.x, point.y, next.x, next.y);
+                i += 2;
+            }
         }
 
         path.closePath();
+    }
+
+    private ContourPoint midpoint(ContourPoint a, ContourPoint b) {
+        return new ContourPoint((a.x + b.x) / 2.0f, (a.y + b.y) / 2.0f, true);
     }
 
     private GeneralPath parseCompoundGlyph(ByteBuffer buf) {
@@ -227,5 +209,18 @@ public class GlyfParser {
         } while ((flags & 0x0020) != 0); // MORE_COMPONENTS
 
         return path;
+    }
+
+    private static class ContourPoint {
+
+        private final float x;
+        private final float y;
+        private final boolean onCurve;
+
+        private ContourPoint(float x, float y, boolean onCurve) {
+            this.x = x;
+            this.y = y;
+            this.onCurve = onCurve;
+        }
     }
 }
