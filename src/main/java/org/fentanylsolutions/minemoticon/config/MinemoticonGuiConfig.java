@@ -17,6 +17,8 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
 
     private static final int BTN_RELOAD = 9990;
     private static final int BTN_OPEN_FOLDER = 9991;
+    private static final int BTN_SELECT_FONT = 9992;
+    private static final int BTN_OPEN_FONTS = 9993;
 
     public MinemoticonGuiConfig(GuiScreen parent) throws ConfigException {
         super(parent, Minemoticon.MODID, Minemoticon.MODID, true, EmojiConfig.class, ServerConfig.class);
@@ -26,15 +28,20 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
     public void initGui() {
         super.initGui();
 
-        // Place buttons at the bottom-right, next to the existing buttons
-        int btnY = this.height - 28;
-        int btnX = this.width - 90;
+        // Custom buttons in a row above the bottom Forge buttons
+        int btnY = this.height - 52;
+        int totalW = this.width - 20;
+        int x = 10;
+        int gap = 4;
+        int btnW = (totalW - gap * 3) / 4;
 
-        var reloadBtn = new GuiButton(BTN_RELOAD, btnX, btnY, 40, 20, "\uD83D\uDD04 Reload");
-        var folderBtn = new GuiButton(BTN_OPEN_FOLDER, btnX + 44, btnY, 44, 20, "\uD83D\uDCC2 Packs");
-
-        this.buttonList.add(reloadBtn);
-        this.buttonList.add(folderBtn);
+        this.buttonList.add(new GuiButton(BTN_SELECT_FONT, x, btnY, btnW, 20, "\uD83C\uDFA8 Emoji Font"));
+        x += btnW + gap;
+        this.buttonList.add(new GuiButton(BTN_OPEN_FONTS, x, btnY, btnW, 20, "\uD83D\uDCC2 Fonts Folder"));
+        x += btnW + gap;
+        this.buttonList.add(new GuiButton(BTN_OPEN_FOLDER, x, btnY, btnW, 20, "\uD83D\uDCC2 Packs Folder"));
+        x += btnW + gap;
+        this.buttonList.add(new GuiButton(BTN_RELOAD, x, btnY, btnW, 20, "\uD83D\uDD04 Reload Packs"));
     }
 
     @Override
@@ -45,6 +52,14 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
         }
         if (button.id == BTN_OPEN_FOLDER) {
             FileUtil.openFolder(EmojiPackLoader.getPacksFolder());
+            return;
+        }
+        if (button.id == BTN_SELECT_FONT) {
+            mc.displayGuiScreen(new FontSelectionScreen(this));
+            return;
+        }
+        if (button.id == BTN_OPEN_FONTS) {
+            FileUtil.openFolder(ClientEmojiHandler.FONTS_DIR);
             return;
         }
         super.actionPerformed(button);

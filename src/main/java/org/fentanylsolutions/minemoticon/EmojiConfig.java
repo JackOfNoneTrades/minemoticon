@@ -31,6 +31,10 @@ public class EmojiConfig {
     @Config.DefaultBoolean(true)
     public static boolean checkForEmojiUpdates;
 
+    @Config.Comment("Emoji font filename in config/minemoticon/fonts/ (empty = bundled Twemoji)")
+    @Config.DefaultString("")
+    public static String emojiFont;
+
     @Config.Comment("Enable debug logging")
     @Config.DefaultBoolean(false)
     public static boolean debugMode;

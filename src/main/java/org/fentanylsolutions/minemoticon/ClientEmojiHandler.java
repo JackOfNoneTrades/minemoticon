@@ -52,7 +52,8 @@ public class ClientEmojiHandler {
     public static final Map<String, Emoji> PACK_CATEGORY_ICONS = new HashMap<>();
     public static boolean error = false;
     private static volatile boolean ready = false;
-    private static ColorFont colorFont;
+    private static ColorFont colorFont; // user-selected or bundled
+    private static ColorFont bundledFont; // always loaded as fallback
     private static EmojiAtlas emojiAtlas;
     private static String fontHash;
 
@@ -91,6 +92,28 @@ public class ClientEmojiHandler {
                 }
             }, "Minemoticon Emoji Updater").start();
         }
+    }
+
+    public static void reloadFont() {
+        // Clear all stock emojis and reload with new font
+        clearTwemojiData();
+        colorFont = null;
+        emojiAtlas = null;
+        fontHash = null;
+        // Reset atlas registration
+        org.fentanylsolutions.minemoticon.api.EmojiFromAtlas.resetAtlasRegistration();
+
+        loadColorFont();
+
+        if (EmojiConfig.enableTwemoji) {
+            String localData = loadLocalEmojiJson();
+            if (localData != null) {
+                parseTwemojis(localData);
+            }
+        }
+
+        buildPickerData();
+        Minemoticon.LOG.info("Reloaded font, {} emojis", EMOJI_LIST.size());
     }
 
     public static void reloadPacks() {
@@ -150,31 +173,48 @@ public class ClientEmojiHandler {
         }
     }
 
+    public static final File FONTS_DIR = new File("config/minemoticon/fonts");
+
     private static void loadColorFont() {
-        try {
-            // Read font bytes for both loading and hashing
-            byte[] fontBytes;
-            try (var stream = ClientEmojiHandler.class.getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
-                if (stream == null) {
-                    Minemoticon.LOG.warn("Twemoji font not found in resources, falling back to CDN");
-                    return;
-                }
+        FONTS_DIR.mkdirs();
+
+        // Always load bundled twemoji as fallback
+        try (var stream = ClientEmojiHandler.class.getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
+            if (stream != null) {
                 var baos = new java.io.ByteArrayOutputStream();
                 byte[] buf = new byte[8192];
                 int n;
                 while ((n = stream.read(buf)) != -1) baos.write(buf, 0, n);
-                fontBytes = baos.toByteArray();
+                byte[] bundledBytes = baos.toByteArray();
+                bundledFont = ColorFont.load(new java.io.ByteArrayInputStream(bundledBytes));
+
+                // Default: use bundled as primary
+                colorFont = bundledFont;
+                fontHash = AtlasBuilder.sha1(bundledBytes);
             }
-
-            colorFont = ColorFont.load(new java.io.ByteArrayInputStream(fontBytes));
-            fontHash = AtlasBuilder.sha1(fontBytes);
-            Minemoticon.LOG.info("Loaded Twemoji COLR font (hash: {})", fontHash);
-
-            // Also check user fonts dir
-            var fontsDir = new File("config/minemoticon/fonts");
-            fontsDir.mkdirs();
         } catch (Exception e) {
-            Minemoticon.LOG.warn("Failed to load Twemoji font, falling back to CDN", e);
+            Minemoticon.LOG.warn("Failed to load bundled twemoji font", e);
+        }
+
+        // Load user-selected font if configured
+        if (EmojiConfig.emojiFont != null && !EmojiConfig.emojiFont.isEmpty()) {
+            try {
+                var userFontFile = new File(FONTS_DIR, EmojiConfig.emojiFont);
+                if (userFontFile.isFile()) {
+                    byte[] userBytes = java.nio.file.Files.readAllBytes(userFontFile.toPath());
+                    colorFont = ColorFont.load(new java.io.ByteArrayInputStream(userBytes));
+                    fontHash = AtlasBuilder.sha1(userBytes);
+                    Minemoticon.LOG.info("Using user emoji font: {}", EmojiConfig.emojiFont);
+                } else {
+                    Minemoticon.LOG.warn("Configured emoji font not found: {}", EmojiConfig.emojiFont);
+                }
+            } catch (Exception e) {
+                Minemoticon.LOG.warn("Failed to load user font {}, using bundled", EmojiConfig.emojiFont, e);
+            }
+        }
+
+        if (colorFont != null) {
+            Minemoticon.LOG.info("Loaded emoji font (hash: {})", fontHash);
         }
     }
 
@@ -262,7 +302,7 @@ public class ClientEmojiHandler {
 
             // Build atlas before creating emoji objects
             if (useAtlas) {
-                // Quick scan to collect all glyphs the font supports
+                // Collect all glyphs that either font can render
                 for (JsonElement element : root.getAsJsonArray()) {
                     var obj = element.getAsJsonObject();
                     if (!obj.get("has_img_twitter")
@@ -276,11 +316,12 @@ public class ClientEmojiHandler {
                     int[] codepoints = java.util.Arrays.stream(unified.split("-"))
                         .mapToInt(hex -> Integer.parseInt(hex, 16))
                         .toArray();
-                    if (codepoints.length > 0 && colorFont.hasGlyph(codepoints[0])) {
+                    if (codepoints.length > 0 && canRenderGlyph(codepoints)) {
                         glyphEntries.add(new AtlasBuilder.GlyphEntry(unified, codepoints));
                     }
                 }
-                emojiAtlas = AtlasBuilder.loadOrBuild(colorFont, fontHash, glyphEntries);
+                // Pass both fonts to atlas builder -- it tries primary first, falls back to bundled
+                emojiAtlas = AtlasBuilder.loadOrBuild(colorFont, bundledFont, fontHash, glyphEntries);
             }
 
             // Second pass: create emoji objects
@@ -310,7 +351,7 @@ public class ClientEmojiHandler {
                     .toArray();
 
                 Emoji emoji;
-                if (useAtlas && codepoints.length > 0 && colorFont.hasGlyph(codepoints[0])) {
+                if (useAtlas && codepoints.length > 0 && canRenderGlyph(codepoints)) {
                     var atlasEmoji = new EmojiFromAtlas(emojiAtlas, unified);
                     atlasEmoji.name = emojiName;
                     atlasEmoji.location = location;
@@ -368,6 +409,12 @@ public class ClientEmojiHandler {
             error = true;
             Minemoticon.LOG.error("Failed to parse twemoji data", e);
         }
+    }
+
+    private static boolean canRenderGlyph(int[] codepoints) {
+        if (colorFont != null && colorFont.canRender(codepoints)) return true;
+        if (bundledFont != null && bundledFont != colorFont && bundledFont.canRender(codepoints)) return true;
+        return false;
     }
 
     private static boolean isStockEmoji(Emoji e) {

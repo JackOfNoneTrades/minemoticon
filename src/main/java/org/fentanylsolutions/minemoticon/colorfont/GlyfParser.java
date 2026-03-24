@@ -20,6 +20,10 @@ public class GlyfParser {
         this.loca = loca;
     }
 
+    public boolean hasOutline(int glyphId) {
+        return loca.getLength(glyphId) > 0;
+    }
+
     public GeneralPath getOutline(int glyphId) {
         long offset = loca.getOffset(glyphId);
         long length = loca.getLength(glyphId);

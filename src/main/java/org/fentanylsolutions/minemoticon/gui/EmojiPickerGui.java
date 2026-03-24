@@ -220,25 +220,30 @@ public class EmojiPickerGui {
                 Gui.drawRect(gfx, gfy, gfx + gfs, gfy + gfs, 0x40FFFFFF);
             }
             var texLoc = gearEmoji.getResourceLocation();
-            Minecraft.getMinecraft()
-                .getTextureManager()
-                .bindTexture(texLoc);
-            float brightness = gearHovered ? 0.9f : 0.6f;
-            GL11.glColor4f(brightness, brightness, brightness, 1.0f);
-            float size = gfs - 3; // smaller gear inside the box
-            float ex = gfx + (gfs - size) / 2.0f;
-            float ey = gfy + (gfs - size) / 2.0f;
-            GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-            GL11.glTexCoord2f(0, 0);
-            GL11.glVertex3f(ex, ey, 0);
-            GL11.glTexCoord2f(0, 1);
-            GL11.glVertex3f(ex, ey + size, 0);
-            GL11.glTexCoord2f(1, 0);
-            GL11.glVertex3f(ex + size, ey, 0);
-            GL11.glTexCoord2f(1, 1);
-            GL11.glVertex3f(ex + size, ey + size, 0);
-            GL11.glEnd();
-            GL11.glColor4f(1, 1, 1, 1);
+            if (texLoc != null) {
+                Minecraft.getMinecraft()
+                    .getTextureManager()
+                    .bindTexture(texLoc);
+                float brightness = gearHovered ? 0.9f : 0.6f;
+                GL11.glColor4f(brightness, brightness, brightness, 1.0f);
+                float[] guv = gearEmoji.getUV();
+                float gu0 = guv != null ? guv[0] : 0, gv0 = guv != null ? guv[1] : 0;
+                float gu1 = guv != null ? guv[2] : 1, gv1 = guv != null ? guv[3] : 1;
+                float size = gfs - 3;
+                float ex = gfx + (gfs - size) / 2.0f;
+                float ey = gfy + (gfs - size) / 2.0f;
+                GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
+                GL11.glTexCoord2f(gu0, gv0);
+                GL11.glVertex3f(ex, ey, 0);
+                GL11.glTexCoord2f(gu0, gv1);
+                GL11.glVertex3f(ex, ey + size, 0);
+                GL11.glTexCoord2f(gu1, gv0);
+                GL11.glVertex3f(ex + size, ey, 0);
+                GL11.glTexCoord2f(gu1, gv1);
+                GL11.glVertex3f(ex + size, ey + size, 0);
+                GL11.glEnd();
+                GL11.glColor4f(1, 1, 1, 1);
+            }
 
             if (gearHovered) {
                 hoveredCategory = "Config";

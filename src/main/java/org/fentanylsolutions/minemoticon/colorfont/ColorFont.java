@@ -19,17 +19,19 @@ public class ColorFont {
     private final CmapParser cmap;
     private final ColrParser colr;
     private final CpalParser cpal;
-    private final GlyfParser glyf;
+    private final GlyfParser glyf; // null if no glyf table (CBDT-only fonts)
+    private final CbdtParser cbdt; // null if no CBDT table
     private final int unitsPerEm;
     private final int ascent;
     private final int descent;
 
-    private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, int unitsPerEm, int ascent,
-        int descent) {
+    private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, CbdtParser cbdt,
+        int unitsPerEm, int ascent, int descent) {
         this.cmap = cmap;
         this.colr = colr;
         this.cpal = cpal;
         this.glyf = glyf;
+        this.cbdt = cbdt;
         this.unitsPerEm = unitsPerEm;
         this.ascent = ascent;
         this.descent = descent;
@@ -38,55 +40,122 @@ public class ColorFont {
     public static ColorFont load(InputStream in) throws IOException {
         var reader = OTFTableReader.load(in);
 
-        if (!reader.hasTable("COLR") || !reader.hasTable("CPAL")) {
-            throw new IOException("Font does not contain COLR/CPAL tables");
+        if (!reader.hasTable("cmap")) {
+            throw new IOException("Font missing cmap table");
+        }
+        boolean hasGlyf = reader.hasTable("glyf") && reader.hasTable("loca");
+        boolean hasCbdt = reader.hasTable("CBDT") && reader.hasTable("CBLC");
+
+        if (!hasGlyf && !hasCbdt) {
+            throw new IOException("Font has no renderable glyph data (needs glyf or CBDT)");
         }
 
         var head = new HeadParser(reader.getTable("head"));
         var maxp = new MaxpParser(reader.getTable("maxp"));
-        var loca = new LocaParser(reader.getTable("loca"), maxp.numGlyphs, head.indexToLocFormat);
         var cmapTable = new CmapParser(reader.getTable("cmap"));
-        var colrTable = new ColrParser(reader.getTable("COLR"));
-        var cpalTable = new CpalParser(reader.getTable("CPAL"));
-        var glyfTable = new GlyfParser(reader.getTable("glyf"), loca);
+
+        // glyf/loca for outline rendering
+        GlyfParser glyfTable = null;
+        if (hasGlyf) {
+            var loca = new LocaParser(reader.getTable("loca"), maxp.numGlyphs, head.indexToLocFormat);
+            glyfTable = new GlyfParser(reader.getTable("glyf"), loca);
+        }
+
+        // CBDT/CBLC for bitmap rendering
+        CbdtParser cbdtTable = null;
+        if (hasCbdt) {
+            cbdtTable = new CbdtParser(reader.getTable("CBLC"), reader.getTable("CBDT"));
+        }
+
+        // COLR/CPAL for color layers (optional)
+        ColrParser colrTable;
+        CpalParser cpalTable;
+        if (reader.hasTable("COLR") && reader.hasTable("CPAL")) {
+            colrTable = new ColrParser(reader.getTable("COLR"));
+            cpalTable = new CpalParser(reader.getTable("CPAL"));
+        } else {
+            colrTable = new ColrParser.Empty();
+            cpalTable = new CpalParser.Empty();
+        }
 
         if (reader.hasTable("hhea")) {
             head.parseHhea(reader.getTable("hhea"));
         }
 
-        return new ColorFont(cmapTable, colrTable, cpalTable, glyfTable, head.unitsPerEm, head.ascent, head.descent);
+        return new ColorFont(
+            cmapTable,
+            colrTable,
+            cpalTable,
+            glyfTable,
+            cbdtTable,
+            head.unitsPerEm,
+            head.ascent,
+            head.descent);
+    }
+
+    public boolean hasAnyColorGlyphs() {
+        return colr.getLayerCount() > 0;
+    }
+
+    // Check if a multi-codepoint sequence can be rendered
+    public boolean canRender(int[] codepoints) {
+        if (codepoints.length == 1) return hasGlyph(codepoints[0]);
+
+        // Filter to base codepoints
+        var base = new java.util.ArrayList<Integer>();
+        for (int cp : codepoints) {
+            if (cp != 0xFE0F && cp != 0xFE0E && cp != 0x200D) base.add(cp);
+        }
+        // Single base after filtering? Can render.
+        if (base.size() == 1) return hasGlyph(base.get(0));
+        // Multi-base: need GSUB, which we don't have
+        return false;
     }
 
     public boolean hasGlyph(int codepoint) {
         int glyphId = cmap.getGlyphId(codepoint);
-        return glyphId != 0 && colr.hasLayers(glyphId);
+        if (glyphId == 0) return false;
+        // Has CBDT bitmap, COLR layers, or actual glyf outline data
+        if (cbdt != null && cbdt.hasBitmap(glyphId)) return true;
+        if (colr.hasLayers(glyphId)) return true;
+        return glyf != null && glyf.hasOutline(glyphId);
     }
 
     // Render a single-codepoint emoji to a BufferedImage at the given pixel size.
     public BufferedImage renderGlyph(int codepoint, int size) {
         int glyphId = cmap.getGlyphId(codepoint);
         if (glyphId == 0) return null;
+
+        // Try CBDT bitmap first (pre-rendered, best quality)
+        if (cbdt != null && cbdt.hasBitmap(glyphId)) {
+            return scaleBitmap(cbdt.getBitmap(glyphId), size);
+        }
         return renderGlyphById(glyphId, size);
     }
 
     // Render a multi-codepoint emoji (ZWJ sequences, flags, etc.).
-    // Tries the combined sequence first via ligature lookup; falls back to first codepoint.
+    // Without GSUB ligature support, we can only render sequences where
+    // the non-VS codepoints reduce to a single base codepoint.
     public BufferedImage renderGlyphs(int[] codepoints, int size) {
-        // For COLR fonts, multi-codepoint sequences are typically handled via GSUB ligatures
-        // that map the sequence to a single glyph. Try the first codepoint as a simple fallback.
-        // A full implementation would parse GSUB, but most single-codepoint emojis work without it.
         if (codepoints.length == 1) {
             return renderGlyph(codepoints[0], size);
         }
 
-        // Try each codepoint -- first one that has COLR layers wins
+        // Filter out variation selectors and ZWJ
+        var base = new java.util.ArrayList<Integer>();
         for (int cp : codepoints) {
-            if (cp == 0xFE0F || cp == 0x200D) continue; // skip variation selector and ZWJ
-            int gid = cmap.getGlyphId(cp);
-            if (gid != 0 && colr.hasLayers(gid)) {
-                return renderGlyphById(gid, size);
+            if (cp != 0xFE0F && cp != 0xFE0E && cp != 0x200D) {
+                base.add(cp);
             }
         }
+
+        // If only one base codepoint remains (e.g. U+2603 + U+FE0F), render it
+        if (base.size() == 1) {
+            return renderGlyph(base.get(0), size);
+        }
+
+        // Multi-codepoint sequences (flags, ZWJ families, skin tones)
+        // need GSUB ligature lookup which we don't support yet
         return null;
     }
 
@@ -134,7 +203,17 @@ public class ColorFont {
         return result;
     }
 
+    private BufferedImage scaleBitmap(BufferedImage src, int size) {
+        var result = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        var g = result.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.drawImage(src, 0, 0, size, size, null);
+        g.dispose();
+        return result;
+    }
+
     private Rectangle2D collectGlyphLayers(int glyphId, List<GeneralPath> outlines, List<Color> colors) {
+        if (glyf == null) return null;
         Rectangle2D bounds = null;
         var layers = colr.getLayers(glyphId);
         if (layers != null) {

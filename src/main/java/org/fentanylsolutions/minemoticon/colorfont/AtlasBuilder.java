@@ -39,7 +39,8 @@ public class AtlasBuilder {
     }
 
     // Try loading cached atlas, or start building in background. Returns the atlas immediately.
-    public static EmojiAtlas loadOrBuild(ColorFont font, String fontHash, List<GlyphEntry> glyphs) {
+    public static EmojiAtlas loadOrBuild(ColorFont primaryFont, ColorFont fallbackFont, String fontHash,
+        List<GlyphEntry> glyphs) {
         var atlas = new EmojiAtlas();
         CACHE_DIR.mkdirs();
 
@@ -48,11 +49,10 @@ public class AtlasBuilder {
         File jsonFile = new File(CACHE_DIR, "atlas_" + atlasKey + ".json");
 
         if (pngFile.isFile() && jsonFile.isFile()) {
-            // Load cached atlas on background thread
             DownloadedTexture.submitToPool(() -> loadFromCache(atlas, pngFile, jsonFile));
         } else {
-            // Build atlas on background thread
-            DownloadedTexture.submitToPool(() -> buildAndCache(atlas, font, glyphs, pngFile, jsonFile));
+            DownloadedTexture
+                .submitToPool(() -> buildAndCache(atlas, primaryFont, fallbackFont, glyphs, pngFile, jsonFile));
         }
 
         return atlas;
@@ -74,11 +74,16 @@ public class AtlasBuilder {
         }
     }
 
-    private static void buildAndCache(EmojiAtlas atlas, ColorFont font, List<GlyphEntry> glyphs, File pngFile,
-        File jsonFile) {
+    private static void buildAndCache(EmojiAtlas atlas, ColorFont primaryFont, ColorFont fallbackFont,
+        List<GlyphEntry> glyphs, File pngFile, File jsonFile) {
         try {
             Minemoticon.LOG.info("Building emoji atlas ({} glyphs)...", glyphs.size());
             long start = System.currentTimeMillis();
+
+            if (glyphs.isEmpty()) {
+                Minemoticon.LOG.warn("No glyphs to build atlas from");
+                return;
+            }
 
             int rows = (glyphs.size() + COLS - 1) / COLS;
             int atlasW = COLS * CELL_SIZE;
@@ -104,12 +109,10 @@ public class AtlasBuilder {
                 int px = col * CELL_SIZE;
                 int py = row * CELL_SIZE;
 
-                // Render glyph at high res
-                BufferedImage glyph;
-                if (entry.codepoints.length == 1) {
-                    glyph = font.renderGlyph(entry.codepoints[0], RENDER_SIZE);
-                } else {
-                    glyph = font.renderGlyphs(entry.codepoints, RENDER_SIZE);
+                // Render glyph: try primary font, fall back to bundled
+                BufferedImage glyph = renderFromFont(primaryFont, entry, RENDER_SIZE);
+                if (glyph == null && fallbackFont != null && fallbackFont != primaryFont) {
+                    glyph = renderFromFont(fallbackFont, entry, RENDER_SIZE);
                 }
 
                 if (glyph != null) {
@@ -188,6 +191,19 @@ public class AtlasBuilder {
             }
         }
         return uvs;
+    }
+
+    private static BufferedImage renderFromFont(ColorFont font, GlyphEntry entry, int size) {
+        if (font == null) return null;
+        try {
+            if (entry.codepoints.length == 1) {
+                return font.renderGlyph(entry.codepoints[0], size);
+            } else {
+                return font.renderGlyphs(entry.codepoints, size);
+            }
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public static String sha1(byte[] data) {

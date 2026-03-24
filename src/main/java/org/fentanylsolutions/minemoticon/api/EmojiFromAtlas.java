@@ -14,6 +14,10 @@ public class EmojiFromAtlas extends Emoji implements RenderableEmoji {
         "textures/atlas/emoji");
     private static boolean atlasRegistered;
 
+    public static void resetAtlasRegistration() {
+        atlasRegistered = false;
+    }
+
     private final EmojiAtlas atlas;
     private final String unified;
 

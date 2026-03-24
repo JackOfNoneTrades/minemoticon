@@ -8,6 +8,10 @@ public class CpalParser {
     private final int[] colors; // ARGB format
 
     public CpalParser(ByteBuffer cpal) {
+        if (cpal == null) {
+            colors = new int[0];
+            return;
+        }
         int base = cpal.position();
         cpal.getShort(); // version
         int numPaletteEntries = cpal.getShort() & 0xFFFF;
@@ -38,5 +42,12 @@ public class CpalParser {
 
     public int getColorCount() {
         return colors.length;
+    }
+
+    public static class Empty extends CpalParser {
+
+        public Empty() {
+            super(null);
+        }
     }
 }

@@ -23,6 +23,7 @@ public class ColrParser {
     private final Map<Integer, List<Layer>> layers = new HashMap<>();
 
     public ColrParser(ByteBuffer colr) {
+        if (colr == null) return;
         int base = colr.position();
         int version = colr.getShort() & 0xFFFF;
         int numBaseGlyphRecords = colr.getShort() & 0xFFFF;
@@ -54,11 +55,22 @@ public class ColrParser {
         }
     }
 
+    public int getLayerCount() {
+        return layers.size();
+    }
+
     public List<Layer> getLayers(int glyphId) {
         return layers.get(glyphId);
     }
 
     public boolean hasLayers(int glyphId) {
         return layers.containsKey(glyphId);
+    }
+
+    public static class Empty extends ColrParser {
+
+        public Empty() {
+            super(null);
+        }
     }
 }
