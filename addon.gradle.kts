@@ -47,8 +47,15 @@ extensions.getByType(org.gradle.api.tasks.SourceSetContainer::class.java)
         java.srcDir("native/freetype-jni/freetype-jni")
     }
 
-val configuredZigVersion = providers.gradleProperty("zigVersion")
-    .orElse("0.13.0")
+val configuredFreetypeVersion = providers.provider {
+    (findProperty("freetypeVersion") as String?) ?: "2.14.3"
+}
+val configuredFreetypeTag = configuredFreetypeVersion.map { version ->
+    "VER-" + version.replace('.', '-')
+}
+val configuredZigVersion = providers.provider {
+    (findProperty("zigVersion") as String?) ?: "0.13.0"
+}
 val defaultNativeTargets = providers.provider {
     if (gradle.startParameter.taskNames.any { taskName ->
             taskName == "build" || taskName == "assemble" || taskName == "jar" || taskName == "shadowJar" || taskName.endsWith("Jar") || taskName.startsWith("publish")
@@ -62,7 +69,10 @@ val configuredNativeTargets = providers.gradleProperty("nativeTargets")
     .orElse(defaultNativeTargets)
 val nativeBuildScript = layout.projectDirectory.file("native/build-zig.sh")
     .asFile.absolutePath
+val freetypeSyncScript = layout.projectDirectory.file("native/sync-freetype.sh")
+    .asFile.absolutePath
 val localZigRoot = layout.projectDirectory.dir("native/toolchains/zig")
+val freetypeSubmoduleRoot = layout.projectDirectory.dir("native/freetype")
 val generatedNativeResourcesRoot = layout.buildDirectory.dir("generated/freetype-resources")
 val generatedBundledNativeResources = generatedNativeResourcesRoot.map { it.dir("natives") }
 
@@ -77,20 +87,52 @@ tasks.register<Exec>("setupLocalZig") {
     outputs.dir(localZigRoot)
 }
 
+tasks.register<Exec>("syncFreetypeSubmodule") {
+    group = "build setup"
+    description = "Initialize the FreeType submodule and check out the configured release tag."
+    workingDir = project.projectDir
+    environment("FREETYPE_VERSION", configuredFreetypeVersion.get())
+    environment("FREETYPE_TAG", configuredFreetypeTag.get())
+    commandLine("bash", freetypeSyncScript, "--sync")
+    inputs.file(freetypeSyncScript)
+    inputs.file(layout.projectDirectory.file(".gitmodules"))
+    inputs.property("freetypeVersion", configuredFreetypeVersion)
+    outputs.upToDateWhen { false }
+}
+
+tasks.register<Exec>("ensureFreetypeSubmodule") {
+    group = "build setup"
+    description = "Initialize the FreeType submodule and verify it matches the configured release tag."
+    workingDir = project.projectDir
+    environment("FREETYPE_VERSION", configuredFreetypeVersion.get())
+    environment("FREETYPE_TAG", configuredFreetypeTag.get())
+    commandLine("bash", freetypeSyncScript, "--verify")
+    inputs.file(freetypeSyncScript)
+    inputs.file(layout.projectDirectory.file(".gitmodules"))
+    inputs.property("freetypeVersion", configuredFreetypeVersion)
+    outputs.upToDateWhen { false }
+}
+
 tasks.register<Exec>("buildFreetypeNatives") {
     group = "build"
     description = "Build bundled FreeType JNI natives for all supported platforms using the local Zig toolchain."
     workingDir = project.projectDir
     dependsOn("setupLocalZig")
+    dependsOn("ensureFreetypeSubmodule")
+    environment("FREETYPE_VERSION", configuredFreetypeVersion.get())
+    environment("FREETYPE_TAG", configuredFreetypeTag.get())
     environment("ZIG_VERSION", configuredZigVersion.get())
     environment("NATIVE_RESOURCE_DIR", generatedBundledNativeResources.get().asFile.absolutePath)
     commandLine("bash", nativeBuildScript, configuredNativeTargets.get())
     inputs.file(nativeBuildScript)
+    inputs.file(freetypeSyncScript)
+    inputs.file(layout.projectDirectory.file(".gitmodules"))
     inputs.file(layout.projectDirectory.file("native/freetype-jni/build.zig"))
     inputs.file(layout.projectDirectory.file("native/freetype-jni/jni/freetype_jni.c"))
     inputs.dir(layout.projectDirectory.dir("native/freetype-jni/freetype-jni"))
+    inputs.dir(freetypeSubmoduleRoot)
     inputs.dir(layout.projectDirectory.dir("native/jni-headers"))
-    inputs.dir(layout.projectDirectory.dir("native/freetype-2.14.3"))
+    inputs.property("freetypeVersion", configuredFreetypeVersion)
     inputs.property("zigVersion", configuredZigVersion)
     inputs.property("nativeTargets", configuredNativeTargets)
     outputs.dir(generatedNativeResourcesRoot)

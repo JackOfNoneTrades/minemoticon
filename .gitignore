@@ -25,6 +25,8 @@ whitelist.json
 /out/
 /native/build/
 /native/build/zig/
+/native/freetype-[0-9]*/
+/native/freetype-[0-9]*.tar.gz
 /native/toolchains/
 /src/main/resources/natives/
 *.iml

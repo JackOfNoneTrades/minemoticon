@@ -12,7 +12,9 @@ Supported platforms:
 
 Environment overrides:
   ZIG_VERSION     Tagged Zig version to bootstrap locally (default: 0.13.0)
-  JAVA_HOME       JDK to use for generating JNI headers and the binding jar
+  JAVA_HOME       JDK to use for generating JNI headers
+  FREETYPE_DIR    FreeType source checkout (default: native/freetype)
+  FREETYPE_TAG    Exact FreeType git tag expected in FREETYPE_DIR
 EOF
 }
 
@@ -23,8 +25,8 @@ BUILD_ROOT="$NATIVE_DIR/build/zig"
 RESOURCES_DIR="${NATIVE_RESOURCE_DIR:-$ROOT_DIR/build/generated/freetype-resources/natives}"
 TOOLCHAIN_ROOT="$NATIVE_DIR/toolchains/zig"
 FREETYPE_VERSION="${FREETYPE_VERSION:-2.14.3}"
-FREETYPE_DIR="$NATIVE_DIR/freetype-$FREETYPE_VERSION"
-FREETYPE_TAR="$NATIVE_DIR/freetype-$FREETYPE_VERSION.tar.gz"
+FREETYPE_TAG="${FREETYPE_TAG:-VER-${FREETYPE_VERSION//./-}}"
+FREETYPE_DIR="${FREETYPE_DIR:-$NATIVE_DIR/freetype}"
 ZIG_VERSION="${ZIG_VERSION:-0.13.0}"
 SUPPORTED_PLATFORMS=(
     macos-arm64
@@ -65,6 +67,7 @@ resolve_java_home() {
 ensure_tools() {
     local missing=()
     command -v curl >/dev/null 2>&1 || missing+=("curl")
+    command -v git >/dev/null 2>&1 || missing+=("git")
     command -v tar >/dev/null 2>&1 || missing+=("tar")
     command -v javac >/dev/null 2>&1 || missing+=("javac")
 
@@ -75,18 +78,21 @@ ensure_tools() {
 }
 
 ensure_freetype_source() {
-    if [[ -d "$FREETYPE_DIR" ]]; then
-        return 0
+    if [[ ! -f "$FREETYPE_DIR/include/freetype/freetype.h" ]]; then
+        echo "Missing FreeType source under $FREETYPE_DIR." >&2
+        echo "Run ./gradlew syncFreetypeSubmodule${FREETYPE_VERSION:+ -PfreetypeVersion=$FREETYPE_VERSION} to initialize it." >&2
+        exit 1
     fi
 
-    if [[ -f "$FREETYPE_TAR" ]]; then
-        echo "Extracting $(basename "$FREETYPE_TAR")..." >&2
-        tar -xzf "$FREETYPE_TAR" -C "$NATIVE_DIR"
-        return 0
+    if git -C "$FREETYPE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local exact_tag
+        exact_tag="$(git -C "$FREETYPE_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
+        if [[ "$exact_tag" != "$FREETYPE_TAG" ]]; then
+            echo "FreeType checkout is at ${exact_tag:-$(git -C "$FREETYPE_DIR" rev-parse --short HEAD)}, expected $FREETYPE_TAG." >&2
+            echo "Run ./gradlew syncFreetypeSubmodule${FREETYPE_VERSION:+ -PfreetypeVersion=$FREETYPE_VERSION} to repin it." >&2
+            exit 1
+        fi
     fi
-
-    echo "Missing FreeType source directory and archive for version $FREETYPE_VERSION." >&2
-    exit 1
 }
 
 is_supported_platform() {
@@ -392,18 +398,18 @@ main() {
     done
 
     ensure_tools
-    ensure_freetype_source
 
     JAVA_HOME_RESOLVED="$(resolve_java_home)"
     export JAVA_HOME="$JAVA_HOME_RESOLVED"
     ZIG_BIN="$(ensure_local_zig)"
-    mkdir -p "$RESOURCES_DIR"
 
     if [[ "$setup_only" -eq 1 ]]; then
         echo "Local Zig ready at $ZIG_BIN" >&2
         exit 0
     fi
 
+    ensure_freetype_source
+    mkdir -p "$RESOURCES_DIR"
     mkdir -p "$BUILD_ROOT"
     GENERATED_HEADERS_DIR="$(prepare_java_bindings)"
 
