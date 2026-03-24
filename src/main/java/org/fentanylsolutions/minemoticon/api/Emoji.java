@@ -12,6 +12,7 @@ public class Emoji implements Predicate<String> {
     public List<String> texts = new ArrayList<>();
     public String location;
     public String category;
+    public String unicodeString;
     public int version = 1;
     public int sort = 0;
 

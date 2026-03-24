@@ -11,8 +11,6 @@ public class EmojiFromTwitmoji extends Emoji implements RenderableEmoji {
 
     private static final String TWEMOJI_CDN = "https://raw.githubusercontent.com/iamcal/emoji-data/master/img-twitter-64/";
 
-    public String unicodeString;
-
     private DownloadedTexture texture;
     private ResourceLocation resourceLocation;
 

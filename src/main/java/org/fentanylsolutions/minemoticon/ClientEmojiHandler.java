@@ -15,8 +15,10 @@ import java.util.Map;
 import java.util.Scanner;
 
 import org.fentanylsolutions.minemoticon.api.Emoji;
+import org.fentanylsolutions.minemoticon.api.EmojiFromFont;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -47,12 +49,16 @@ public class ClientEmojiHandler {
     public static final Map<String, Emoji> PACK_CATEGORY_ICONS = new HashMap<>();
     public static boolean error = false;
     private static volatile boolean ready = false;
+    private static ColorFont colorFont;
 
     public static boolean isReady() {
         return ready;
     }
 
     public static void setup() {
+        // Load color font for stock emoji rendering
+        loadColorFont();
+
         // Load packs synchronously (local files, fast)
         loadPacks();
 
@@ -136,6 +142,19 @@ public class ClientEmojiHandler {
             if (iconEmoji != null) {
                 PACK_CATEGORY_ICONS.put(pack.displayName, iconEmoji);
             }
+        }
+    }
+
+    private static void loadColorFont() {
+        try (var stream = ClientEmojiHandler.class.getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
+            if (stream != null) {
+                colorFont = ColorFont.load(stream);
+                Minemoticon.LOG.info("Loaded Twemoji COLR font");
+            } else {
+                Minemoticon.LOG.warn("Twemoji font not found in resources, falling back to CDN");
+            }
+        } catch (Exception e) {
+            Minemoticon.LOG.warn("Failed to load Twemoji font, falling back to CDN", e);
         }
     }
 
@@ -226,15 +245,43 @@ public class ClientEmojiHandler {
                         .getAsString()))
                     continue;
 
-                var emoji = new EmojiFromTwitmoji();
-                emoji.name = obj.get("short_name")
+                String emojiName = obj.get("short_name")
                     .getAsString();
-                emoji.location = obj.get("image")
+                String location = obj.get("image")
                     .getAsString();
-                emoji.sort = obj.get("sort_order")
+                int sort = obj.get("sort_order")
                     .getAsInt();
-                emoji.category = obj.get("category")
+                String category = obj.get("category")
                     .getAsString();
+                String unified = obj.get("unified")
+                    .getAsString();
+                String unicodeStr = unifiedToString(unified);
+
+                // Parse codepoints for font rendering
+                int[] codepoints = unified.chars()
+                    .count() > 0 ? java.util.Arrays.stream(unified.split("-"))
+                        .mapToInt(hex -> Integer.parseInt(hex, 16))
+                        .toArray() : new int[0];
+
+                // Try font rendering first, fall back to CDN download
+                Emoji emoji;
+                if (colorFont != null && codepoints.length > 0 && colorFont.hasGlyph(codepoints[0])) {
+                    var fontEmoji = new EmojiFromFont(colorFont, codepoints);
+                    fontEmoji.name = emojiName;
+                    fontEmoji.location = location;
+                    fontEmoji.sort = sort;
+                    fontEmoji.category = category;
+                    fontEmoji.unicodeString = unicodeStr;
+                    emoji = fontEmoji;
+                } else {
+                    var cdnEmoji = new EmojiFromTwitmoji();
+                    cdnEmoji.name = emojiName;
+                    cdnEmoji.location = location;
+                    cdnEmoji.sort = sort;
+                    cdnEmoji.category = category;
+                    cdnEmoji.unicodeString = unicodeStr;
+                    emoji = cdnEmoji;
+                }
 
                 obj.get("short_names")
                     .getAsJsonArray()
@@ -256,9 +303,6 @@ public class ClientEmojiHandler {
                     registerShortName(key, emoji);
                 }
 
-                String unified = obj.get("unified")
-                    .getAsString();
-                emoji.unicodeString = unifiedToString(unified);
                 registerUnicode(unified, emoji);
 
                 EMOJI_MAP.computeIfAbsent(emoji.category, k -> new ArrayList<>())
@@ -281,15 +325,19 @@ public class ClientEmojiHandler {
         }
     }
 
+    private static boolean isStockEmoji(Emoji e) {
+        return e instanceof EmojiFromTwitmoji || e instanceof EmojiFromFont;
+    }
+
     private static void clearTwemojiData() {
-        EMOJI_LIST.removeIf(e -> e instanceof EmojiFromTwitmoji);
-        EMOJI_WITH_TEXTS.removeIf(e -> e instanceof EmojiFromTwitmoji);
+        EMOJI_LIST.removeIf(ClientEmojiHandler::isStockEmoji);
+        EMOJI_WITH_TEXTS.removeIf(ClientEmojiHandler::isStockEmoji);
         EMOJI_LOOKUP.values()
-            .removeIf(e -> e instanceof EmojiFromTwitmoji);
+            .removeIf(ClientEmojiHandler::isStockEmoji);
         EMOJI_UNICODE_LOOKUP.values()
-            .removeIf(e -> e instanceof EmojiFromTwitmoji);
+            .removeIf(ClientEmojiHandler::isStockEmoji);
         EMOJI_BY_SHORT_NAME.values()
-            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromTwitmoji));
+            .forEach(list -> list.removeIf(ClientEmojiHandler::isStockEmoji));
         EMOJI_BY_SHORT_NAME.values()
             .removeIf(List::isEmpty);
         UNICODE_KEYS_BY_CHAR.clear();
