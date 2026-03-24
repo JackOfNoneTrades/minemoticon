@@ -20,6 +20,20 @@ public class EmojiFromPack extends Emoji implements RenderableEmoji {
         this.packFolder = packFolder;
         this.imageFile = imageFile;
         this.strings.add(":" + name + ":");
+        this.strings.add(":" + packFolder + "/" + name + ":");
+    }
+
+    public String getNamespaced() {
+        return ":" + packFolder + "/" + name + ":";
+    }
+
+    @Override
+    public String getInsertText() {
+        return getNamespaced();
+    }
+
+    public String getPackFolder() {
+        return packFolder;
     }
 
     private void checkLoad() {

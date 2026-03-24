@@ -31,14 +31,17 @@ public class EmoteServerHandler {
         public final String sender;
         public final byte type;
         public final String category;
+        public final String namespace;
         public final boolean isIcon;
 
-        public CachedEmote(String checksum, byte[] data, String sender, byte type, String category, boolean isIcon) {
+        public CachedEmote(String checksum, byte[] data, String sender, byte type, String category, String namespace,
+            boolean isIcon) {
             this.checksum = checksum;
             this.data = data;
             this.sender = sender;
             this.type = type;
             this.category = category != null ? category : "";
+            this.namespace = namespace != null ? namespace : "";
             this.isIcon = isIcon;
         }
     }
@@ -168,6 +171,7 @@ public class EmoteServerHandler {
             pending.senderName,
             PacketEmoteBroadcast.TYPE_CLIENT_EMOTE,
             "",
+            "",
             false);
         emoteCache.put(pending.name, cached);
 
@@ -221,6 +225,7 @@ public class EmoteServerHandler {
             cached.sender,
             cached.type,
             cached.category,
+            cached.namespace,
             cached.isIcon);
         List<EntityPlayerMP> players = MinecraftServer.getServer()
             .getConfigurationManager().playerEntityList;
@@ -239,6 +244,7 @@ public class EmoteServerHandler {
             cached.sender,
             cached.type,
             cached.category,
+            cached.namespace,
             cached.isIcon);
         List<EntityPlayerMP> players = MinecraftServer.getServer()
             .getConfigurationManager().playerEntityList;
@@ -291,6 +297,7 @@ public class EmoteServerHandler {
                             "",
                             PacketEmoteBroadcast.TYPE_SERVER_PACK,
                             pack.displayName,
+                            pack.folderName,
                             isIcon));
                     count++;
                 } catch (Exception e) {
@@ -338,6 +345,7 @@ public class EmoteServerHandler {
                     "",
                     PacketEmoteBroadcast.TYPE_SERVER_PACK,
                     cached.category,
+                    cached.namespace,
                     cached.isIcon);
                 NetworkHandler.INSTANCE.sendTo(packet, player);
             }
@@ -353,7 +361,7 @@ public class EmoteServerHandler {
             return;
         }
         String checksum = sha1(sanitized);
-        var cached = new CachedEmote(checksum, sanitized, "", PacketEmoteBroadcast.TYPE_ONE_OFF, "", false);
+        var cached = new CachedEmote(checksum, sanitized, "", PacketEmoteBroadcast.TYPE_ONE_OFF, "", "", false);
         emoteCache.put(name, cached);
         broadcastToAll(name, cached);
         Minemoticon.debug("Registered one-off emote: {} (checksum {})", name, checksum);

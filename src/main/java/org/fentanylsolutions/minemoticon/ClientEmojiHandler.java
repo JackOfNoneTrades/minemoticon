@@ -27,6 +27,8 @@ public class ClientEmojiHandler {
     public static final List<Emoji> EMOJI_LIST = new ArrayList<>();
     public static final List<Emoji> EMOJI_WITH_TEXTS = new ArrayList<>();
     public static final Map<String, Emoji> EMOJI_LOOKUP = new HashMap<>();
+    // All emojis by short name (for suggestion helper collision display)
+    public static final Map<String, List<Emoji>> EMOJI_BY_SHORT_NAME = new HashMap<>();
     // Keyed by first char of the unicode string, values sorted longest-first
     public static final Map<Character, List<String>> UNICODE_KEYS_BY_CHAR = new HashMap<>();
     public static final Map<String, Emoji> EMOJI_UNICODE_LOOKUP = new HashMap<>();
@@ -89,6 +91,10 @@ public class ClientEmojiHandler {
             }
             EMOJI_LIST.remove(pack);
         }
+        EMOJI_BY_SHORT_NAME.values()
+            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromPack));
+        EMOJI_BY_SHORT_NAME.values()
+            .removeIf(List::isEmpty);
         for (var cat : new ArrayList<>(EMOJI_MAP.keySet())) {
             if (!isStandardCategory(cat)) {
                 EMOJI_MAP.remove(cat);
@@ -109,7 +115,11 @@ public class ClientEmojiHandler {
 
             for (var entry : pack.entries) {
                 var emoji = new EmojiFromPack(entry.name, pack.displayName, pack.folderName, entry.imageFile);
+                // Namespaced key always registered (for wire format)
+                EMOJI_LOOKUP.put(emoji.getNamespaced(), emoji);
+                // Short key: pack overrides stock for rendering
                 EMOJI_LOOKUP.put(":" + entry.name + ":", emoji);
+                registerShortName(":" + entry.name + ":", emoji);
                 EMOJI_MAP.computeIfAbsent(pack.displayName, k -> new ArrayList<>())
                     .add(emoji);
                 EMOJI_LIST.add(emoji);
@@ -243,6 +253,7 @@ public class ClientEmojiHandler {
 
                 for (String key : emoji.strings) {
                     EMOJI_LOOKUP.put(key, emoji);
+                    registerShortName(key, emoji);
                 }
 
                 String unified = obj.get("unified")
@@ -277,6 +288,10 @@ public class ClientEmojiHandler {
             .removeIf(e -> e instanceof EmojiFromTwitmoji);
         EMOJI_UNICODE_LOOKUP.values()
             .removeIf(e -> e instanceof EmojiFromTwitmoji);
+        EMOJI_BY_SHORT_NAME.values()
+            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromTwitmoji));
+        EMOJI_BY_SHORT_NAME.values()
+            .removeIf(List::isEmpty);
         UNICODE_KEYS_BY_CHAR.clear();
         for (String cat : CATEGORY_ORDER) {
             EMOJI_MAP.remove(cat);
@@ -306,6 +321,11 @@ public class ClientEmojiHandler {
                 addCategory(cat, EMOJI_MAP.get(cat));
             }
         }
+    }
+
+    public static void registerShortName(String shortKey, Emoji emoji) {
+        EMOJI_BY_SHORT_NAME.computeIfAbsent(shortKey, k -> new ArrayList<>())
+            .add(emoji);
     }
 
     private static boolean hasRemoteUsable(List<Emoji> emojis) {

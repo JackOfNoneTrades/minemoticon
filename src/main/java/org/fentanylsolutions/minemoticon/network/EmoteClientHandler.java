@@ -38,6 +38,7 @@ public class EmoteClientHandler {
     private static final Map<String, Boolean> pendingUsable = new HashMap<>();
     private static final Map<String, String> pendingCategories = new HashMap<>();
     private static final Map<String, Boolean> pendingIsIcon = new HashMap<>();
+    private static final Map<String, String> pendingNamespaces = new HashMap<>();
 
     // Called when the client is about to send a chat message containing pack emojis
     public static void announceEmotesInMessage(String message) {
@@ -92,7 +93,7 @@ public class EmoteClientHandler {
 
     // Server is telling us an emote is available
     public static void onEmoteBroadcast(String name, String checksum, String senderName, byte type, String category,
-        boolean isIcon) {
+        String namespace, boolean isIcon) {
         if (type == PacketEmoteBroadcast.TYPE_CLIENT_EMOTE && !EmojiConfig.receiveClientEmotes) return;
 
         boolean usable = type == PacketEmoteBroadcast.TYPE_SERVER_PACK;
@@ -110,6 +111,7 @@ public class EmoteClientHandler {
         pendingUsable.put(name, usable);
         pendingCategories.put(name, effectiveCategory);
         pendingIsIcon.put(name, isIcon);
+        pendingNamespaces.put(name, namespace != null ? namespace : "");
 
         // Already registered with same checksum?
         Emoji existing = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + name + ":");
@@ -121,7 +123,7 @@ public class EmoteClientHandler {
         // Check disk cache
         File cached = new File(CACHE_DIR, checksum + ".png");
         if (cached.isFile()) {
-            registerRemoteEmoji(name, checksum, cached, effectiveCategory, usable, isIcon);
+            registerRemoteEmoji(name, checksum, cached, effectiveCategory, namespace, usable, isIcon);
             return;
         }
 
@@ -150,6 +152,7 @@ public class EmoteClientHandler {
         pendingUsable.clear();
         pendingCategories.clear();
         pendingIsIcon.clear();
+        pendingNamespaces.clear();
         clearRemoteEmojis();
     }
 
@@ -163,6 +166,10 @@ public class EmoteClientHandler {
             .removeIf(java.util.List::isEmpty);
         ClientEmojiHandler.PACK_CATEGORY_ICONS.values()
             .removeIf(e -> e instanceof EmojiFromRemote);
+        ClientEmojiHandler.EMOJI_BY_SHORT_NAME.values()
+            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromRemote));
+        ClientEmojiHandler.EMOJI_BY_SHORT_NAME.values()
+            .removeIf(java.util.List::isEmpty);
         ClientEmojiHandler.buildPickerData();
         Minemoticon.debug("Cleared remote emojis");
     }
@@ -191,25 +198,33 @@ public class EmoteClientHandler {
             boolean usable = pendingUsable.getOrDefault(pending.name, false);
             String cat = pendingCategories.getOrDefault(pending.name, "Remote");
             boolean isIcon = pendingIsIcon.getOrDefault(pending.name, false);
+            String ns = pendingNamespaces.getOrDefault(pending.name, "");
             pendingUsable.remove(pending.name);
             pendingCategories.remove(pending.name);
             pendingIsIcon.remove(pending.name);
+            pendingNamespaces.remove(pending.name);
             Minemoticon.debug(
                 "Cached remote emote {} ({} bytes, category={}, usable={})",
                 pending.name,
                 raw.length,
                 cat,
                 usable);
-            registerRemoteEmoji(pending.name, checksum, cacheFile, cat, usable, isIcon);
+            registerRemoteEmoji(pending.name, checksum, cacheFile, cat, ns, usable, isIcon);
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to cache remote emote: {}", pending.name, e);
         }
     }
 
     private static void registerRemoteEmoji(String name, String checksum, File cacheFile, String category,
-        boolean usable, boolean isIcon) {
+        String namespace, boolean usable, boolean isIcon) {
         var emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable);
+        // Always register short key
         ClientEmojiHandler.EMOJI_LOOKUP.put(":" + name + ":", emoji);
+        ClientEmojiHandler.registerShortName(":" + name + ":", emoji);
+        // Register namespaced key if namespace is present (for wire format disambiguation)
+        if (namespace != null && !namespace.isEmpty()) {
+            ClientEmojiHandler.EMOJI_LOOKUP.put(":" + namespace + "/" + name + ":", emoji);
+        }
         if (usable) {
             ClientEmojiHandler.EMOJI_MAP.computeIfAbsent(category, k -> new java.util.ArrayList<>())
                 .add(emoji);

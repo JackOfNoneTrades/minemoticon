@@ -61,15 +61,21 @@ public class EmojiSuggestionHelper {
             .toLowerCase();
         if (partial.length() < MIN_QUERY_LENGTH) return;
 
-        // Find matching emoji names
-        for (var entry : ClientEmojiHandler.EMOJI_LOOKUP.entrySet()) {
+        // Find matching emoji names using EMOJI_BY_SHORT_NAME (includes all emojis sharing a name)
+        var seen = new java.util.HashSet<Emoji>();
+        for (var entry : ClientEmojiHandler.EMOJI_BY_SHORT_NAME.entrySet()) {
             String key = entry.getKey(); // :name:
-            String name = key.substring(1, key.length() - 1); // strip colons
-            if (name.toLowerCase()
-                .startsWith(partial)) {
-                suggestions.add(entry.getValue());
+            String inner = key.substring(1, key.length() - 1);
+            if (inner.contains("/")) continue;
+            if (!inner.toLowerCase()
+                .startsWith(partial)) continue;
+            for (Emoji emoji : entry.getValue()) {
+                if (seen.contains(emoji)) continue;
+                seen.add(emoji);
+                suggestions.add(emoji);
                 if (suggestions.size() >= MAX_SUGGESTIONS) break;
             }
+            if (suggestions.size() >= MAX_SUGGESTIONS) break;
         }
 
         // Sort shorter names first (more relevant)
@@ -97,7 +103,9 @@ public class EmojiSuggestionHelper {
         EmojiRenderer.bypass = true;
         int popupW = 0;
         for (Emoji e : suggestions) {
-            int w = font.getStringWidth(e.getShorterString()) + 16;
+            String label = e.getShorterString();
+            if (hasNameCollision(e)) label += " (" + e.category + ")";
+            int w = font.getStringWidth(label) + 16;
             if (w > popupW) popupW = w;
         }
         popupW = Math.max(popupW, 60);
@@ -130,10 +138,15 @@ public class EmojiSuggestionHelper {
                 GL11.glColor4f(1, 1, 1, 1);
             }
 
-            // Name
+            // Name + source label on collision
             int color = selected ? 0xFFFFFF00 : 0xFFAAAAAA;
             EmojiRenderer.bypass = true;
-            font.drawStringWithShadow(emoji.getShorterString(), popupX + 12, rowY + 2, color);
+            String label = emoji.getShorterString();
+            // Show source if another emoji shares the same short name
+            if (hasNameCollision(emoji)) {
+                label += " \u00a77(" + emoji.category + ")";
+            }
+            font.drawStringWithShadow(label, popupX + 12, rowY + 2, color);
             EmojiRenderer.bypass = false;
         }
 
@@ -274,5 +287,11 @@ public class EmojiSuggestionHelper {
         }
 
         return textX + font.getStringWidth(visibleText.substring(0, relativeIndex));
+    }
+
+    private boolean hasNameCollision(Emoji emoji) {
+        String shortKey = emoji.getShorterString();
+        var all = ClientEmojiHandler.EMOJI_BY_SHORT_NAME.get(shortKey);
+        return all != null && all.size() > 1;
     }
 }
