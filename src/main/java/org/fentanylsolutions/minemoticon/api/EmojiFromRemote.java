@@ -7,19 +7,21 @@ import net.minecraft.util.ResourceLocation;
 
 import org.fentanylsolutions.minemoticon.Minemoticon;
 
-// Emoji received from another player via the server. Texture loaded from local cache file.
+// Emoji received from another player or server. Texture loaded from local cache file.
 public class EmojiFromRemote extends Emoji implements RenderableEmoji {
 
     private final File cacheFile;
     private final String checksum;
+    private final boolean usable; // if true, appears in picker
     private FileTexture texture;
     private ResourceLocation resourceLocation;
 
-    public EmojiFromRemote(String name, String checksum, File cacheFile) {
+    public EmojiFromRemote(String name, String checksum, File cacheFile, String category, boolean usable) {
         this.name = name;
         this.checksum = checksum;
         this.cacheFile = cacheFile;
-        this.category = "Remote";
+        this.category = category;
+        this.usable = usable;
         this.strings.add(":" + name + ":");
     }
 
@@ -46,5 +48,9 @@ public class EmojiFromRemote extends Emoji implements RenderableEmoji {
 
     public String getChecksum() {
         return checksum;
+    }
+
+    public boolean isUsable() {
+        return usable;
     }
 }

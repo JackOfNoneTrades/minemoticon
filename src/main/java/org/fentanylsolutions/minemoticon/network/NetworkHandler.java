@@ -29,6 +29,8 @@ public class NetworkHandler {
             packetId++,
             Side.CLIENT);
         INSTANCE.registerMessage(PacketEmoteReject.Handler.class, PacketEmoteReject.class, packetId++, Side.CLIENT);
+        INSTANCE
+            .registerMessage(PacketServerPackClear.Handler.class, PacketServerPackClear.class, packetId++, Side.CLIENT);
 
         // C->S
         INSTANCE.registerMessage(

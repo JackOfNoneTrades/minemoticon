@@ -35,6 +35,9 @@ public class EmoteClientHandler {
     }
 
     private static final Map<String, PendingDownload> pendingDownloads = new HashMap<>();
+    private static final Map<String, Boolean> pendingUsable = new HashMap<>();
+    private static final Map<String, String> pendingCategories = new HashMap<>();
+    private static final Map<String, Boolean> pendingIsIcon = new HashMap<>();
 
     // Called when the client is about to send a chat message containing pack emojis
     public static void announceEmotesInMessage(String message) {
@@ -88,12 +91,27 @@ public class EmoteClientHandler {
     }
 
     // Server is telling us an emote is available
-    public static void onEmoteBroadcast(String name, String checksum, String senderName) {
-        if (!EmojiConfig.receiveClientEmotes) return;
+    public static void onEmoteBroadcast(String name, String checksum, String senderName, byte type, String category,
+        boolean isIcon) {
+        if (type == PacketEmoteBroadcast.TYPE_CLIENT_EMOTE && !EmojiConfig.receiveClientEmotes) return;
 
-        Minemoticon.debug("Emote broadcast: {} from {} (checksum {})", name, senderName, checksum);
+        boolean usable = type == PacketEmoteBroadcast.TYPE_SERVER_PACK;
+        String effectiveCategory = (category != null && !category.isEmpty()) ? category
+            : (usable ? "Server" : "Remote");
+        Minemoticon.debug(
+            "Emote broadcast: {} from {} (checksum {}, type {}, category {})",
+            name,
+            senderName,
+            checksum,
+            type,
+            effectiveCategory);
 
-        // Already registered?
+        // Store for when download completes
+        pendingUsable.put(name, usable);
+        pendingCategories.put(name, effectiveCategory);
+        pendingIsIcon.put(name, isIcon);
+
+        // Already registered with same checksum?
         Emoji existing = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + name + ":");
         if (existing instanceof EmojiFromRemote remote && remote.getChecksum()
             .equals(checksum)) {
@@ -103,7 +121,7 @@ public class EmoteClientHandler {
         // Check disk cache
         File cached = new File(CACHE_DIR, checksum + ".png");
         if (cached.isFile()) {
-            registerRemoteEmoji(name, checksum, cached);
+            registerRemoteEmoji(name, checksum, cached, effectiveCategory, usable, isIcon);
             return;
         }
 
@@ -129,6 +147,24 @@ public class EmoteClientHandler {
 
     public static void reset() {
         pendingDownloads.clear();
+        pendingUsable.clear();
+        pendingCategories.clear();
+        pendingIsIcon.clear();
+        clearRemoteEmojis();
+    }
+
+    public static void clearRemoteEmojis() {
+        ClientEmojiHandler.EMOJI_LOOKUP.values()
+            .removeIf(e -> e instanceof EmojiFromRemote);
+        ClientEmojiHandler.EMOJI_LIST.removeIf(e -> e instanceof EmojiFromRemote);
+        ClientEmojiHandler.EMOJI_MAP.values()
+            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromRemote));
+        ClientEmojiHandler.EMOJI_MAP.values()
+            .removeIf(java.util.List::isEmpty);
+        ClientEmojiHandler.PACK_CATEGORY_ICONS.values()
+            .removeIf(e -> e instanceof EmojiFromRemote);
+        ClientEmojiHandler.buildPickerData();
+        Minemoticon.debug("Cleared remote emojis");
     }
 
     private static void processDownload(PendingDownload pending) {
@@ -152,17 +188,41 @@ public class EmoteClientHandler {
         File cacheFile = new File(CACHE_DIR, checksum + ".png");
         try {
             Files.write(cacheFile.toPath(), raw);
-            Minemoticon.debug("Cached remote emote {} ({} bytes)", pending.name, raw.length);
-            registerRemoteEmoji(pending.name, checksum, cacheFile);
+            boolean usable = pendingUsable.getOrDefault(pending.name, false);
+            String cat = pendingCategories.getOrDefault(pending.name, "Remote");
+            boolean isIcon = pendingIsIcon.getOrDefault(pending.name, false);
+            pendingUsable.remove(pending.name);
+            pendingCategories.remove(pending.name);
+            pendingIsIcon.remove(pending.name);
+            Minemoticon.debug(
+                "Cached remote emote {} ({} bytes, category={}, usable={})",
+                pending.name,
+                raw.length,
+                cat,
+                usable);
+            registerRemoteEmoji(pending.name, checksum, cacheFile, cat, usable, isIcon);
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to cache remote emote: {}", pending.name, e);
         }
     }
 
-    private static void registerRemoteEmoji(String name, String checksum, File cacheFile) {
-        var emoji = new EmojiFromRemote(name, checksum, cacheFile);
+    private static void registerRemoteEmoji(String name, String checksum, File cacheFile, String category,
+        boolean usable, boolean isIcon) {
+        var emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable);
         ClientEmojiHandler.EMOJI_LOOKUP.put(":" + name + ":", emoji);
-        Minemoticon.debug("Registered remote emote: {} (checksum {})", name, checksum);
+        if (usable) {
+            ClientEmojiHandler.EMOJI_MAP.computeIfAbsent(category, k -> new java.util.ArrayList<>())
+                .add(emoji);
+            ClientEmojiHandler.EMOJI_LIST.add(emoji);
+            if (isIcon) {
+                ClientEmojiHandler.PACK_CATEGORY_ICONS.put(category, emoji);
+            } else {
+                ClientEmojiHandler.PACK_CATEGORY_ICONS.putIfAbsent(category, emoji);
+            }
+            ClientEmojiHandler.buildPickerData();
+        }
+        Minemoticon
+            .debug("Registered remote emote: {} (checksum {}, usable={}, icon={})", name, checksum, usable, isIcon);
     }
 
     private static String checksumForPack(EmojiFromPack pack) {

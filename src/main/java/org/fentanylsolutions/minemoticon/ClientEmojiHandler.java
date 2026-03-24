@@ -105,29 +105,26 @@ public class ClientEmojiHandler {
     private static void loadPacks() {
         var packs = EmojiPackLoader.loadPacks();
         for (var pack : packs) {
-            // Find icon emoji
-            Emoji iconEmoji = null;
-            if (pack.iconEmojiName != null) {
-                for (var e : pack.emojis) {
-                    if (e.name.equals(pack.iconEmojiName)) {
-                        iconEmoji = e;
-                        break;
-                    }
-                }
-            }
-            if (iconEmoji == null && !pack.emojis.isEmpty()) {
-                iconEmoji = pack.emojis.get(0);
-            }
-            if (iconEmoji != null) {
-                PACK_CATEGORY_ICONS.put(pack.name, iconEmoji);
-            }
+            EmojiFromPack iconEmoji = null;
 
-            for (var emoji : pack.emojis) {
-                EMOJI_LOOKUP.put(":" + emoji.name + ":", emoji);
-                EMOJI_MAP.computeIfAbsent(pack.name, k -> new ArrayList<>())
+            for (var entry : pack.entries) {
+                var emoji = new EmojiFromPack(entry.name, pack.displayName, pack.folderName, entry.imageFile);
+                EMOJI_LOOKUP.put(":" + entry.name + ":", emoji);
+                EMOJI_MAP.computeIfAbsent(pack.displayName, k -> new ArrayList<>())
                     .add(emoji);
                 EMOJI_LIST.add(emoji);
                 PACK_EMOJIS.add(emoji);
+
+                if (entry.name.equals(pack.iconEmojiName)) {
+                    iconEmoji = emoji;
+                }
+                if (iconEmoji == null) {
+                    iconEmoji = emoji; // first emoji as fallback
+                }
+            }
+
+            if (iconEmoji != null) {
+                PACK_CATEGORY_ICONS.put(pack.displayName, iconEmoji);
             }
         }
     }
@@ -286,14 +283,20 @@ public class ClientEmojiHandler {
         }
     }
 
-    private static void buildPickerData() {
+    public static void buildPickerData() {
         CATEGORIES.clear();
         PICKER_LINES.clear();
         CATEGORY_LINE_INDEX.clear();
 
-        // Server/custom categories first (anything not in the standard list)
+        // Server pack categories first (contain EmojiFromRemote with usable=true)
         for (var entry : EMOJI_MAP.entrySet()) {
-            if (!isStandardCategory(entry.getKey())) {
+            if (!isStandardCategory(entry.getKey()) && hasRemoteUsable(entry.getValue())) {
+                addCategory(entry.getKey(), entry.getValue());
+            }
+        }
+        // Then client pack categories (non-standard, no remote usable)
+        for (var entry : EMOJI_MAP.entrySet()) {
+            if (!isStandardCategory(entry.getKey()) && !CATEGORIES.contains(entry.getKey())) {
                 addCategory(entry.getKey(), entry.getValue());
             }
         }
@@ -303,6 +306,13 @@ public class ClientEmojiHandler {
                 addCategory(cat, EMOJI_MAP.get(cat));
             }
         }
+    }
+
+    private static boolean hasRemoteUsable(List<Emoji> emojis) {
+        for (var e : emojis) {
+            if (e instanceof org.fentanylsolutions.minemoticon.api.EmojiFromRemote r && r.isUsable()) return true;
+        }
+        return false;
     }
 
     private static boolean isStandardCategory(String name) {

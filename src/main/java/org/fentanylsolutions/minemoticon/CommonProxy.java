@@ -29,13 +29,17 @@ public class CommonProxy {
 
     public void postInit(FMLPostInitializationEvent event) {}
 
-    public void serverStarting(FMLServerStartingEvent event) {}
+    public void serverStarting(FMLServerStartingEvent event) {
+        event.registerServerCommand(new CommandReloadEmojis());
+        EmoteServerHandler.loadServerPacks();
+    }
 
     @SubscribeEvent
     public void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.player instanceof EntityPlayerMP player) {
             Minemoticon.debug("Sending presence packet to {}", player.getCommandSenderName());
             NetworkHandler.INSTANCE.sendTo(new PacketServerPresence(), player);
+            EmoteServerHandler.sendServerPacksToPlayer(player);
         }
     }
 

@@ -14,6 +14,7 @@ import javax.imageio.ImageIO;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
 
+import org.fentanylsolutions.minemoticon.EmojiPackLoader;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.ServerConfig;
 
@@ -28,11 +29,17 @@ public class EmoteServerHandler {
         public final String checksum;
         public final byte[] data;
         public final String sender;
+        public final byte type;
+        public final String category;
+        public final boolean isIcon;
 
-        public CachedEmote(String checksum, byte[] data, String sender) {
+        public CachedEmote(String checksum, byte[] data, String sender, byte type, String category, boolean isIcon) {
             this.checksum = checksum;
             this.data = data;
             this.sender = sender;
+            this.type = type;
+            this.category = category != null ? category : "";
+            this.isIcon = isIcon;
         }
     }
 
@@ -155,7 +162,13 @@ public class EmoteServerHandler {
         }
 
         String checksum = sha1(sanitized);
-        var cached = new CachedEmote(checksum, sanitized, pending.senderName);
+        var cached = new CachedEmote(
+            checksum,
+            sanitized,
+            pending.senderName,
+            PacketEmoteBroadcast.TYPE_CLIENT_EMOTE,
+            "",
+            false);
         emoteCache.put(pending.name, cached);
 
         Minemoticon.debug(
@@ -169,11 +182,15 @@ public class EmoteServerHandler {
     }
 
     private static byte[] sanitize(byte[] raw) {
+        return sanitize(raw, true);
+    }
+
+    private static byte[] sanitize(byte[] raw, boolean enforceMaxDimension) {
         try {
             BufferedImage img = ImageIO.read(new ByteArrayInputStream(raw));
             if (img == null) return null;
 
-            if (img.getWidth() > MAX_DIMENSION || img.getHeight() > MAX_DIMENSION) {
+            if (enforceMaxDimension && (img.getWidth() > MAX_DIMENSION || img.getHeight() > MAX_DIMENSION)) {
                 Minemoticon.debug(
                     "Emote rejected: dimensions {}x{} exceed max {}",
                     img.getWidth(),
@@ -197,14 +214,36 @@ public class EmoteServerHandler {
     }
 
     @SuppressWarnings("unchecked")
-    private static void broadcastEmote(String name, CachedEmote cached, EntityPlayerMP sender) {
-        var packet = new PacketEmoteBroadcast(name, cached.checksum, cached.sender);
+    private static void broadcastEmote(String name, CachedEmote cached, EntityPlayerMP excludePlayer) {
+        var packet = new PacketEmoteBroadcast(
+            name,
+            cached.checksum,
+            cached.sender,
+            cached.type,
+            cached.category,
+            cached.isIcon);
         List<EntityPlayerMP> players = MinecraftServer.getServer()
             .getConfigurationManager().playerEntityList;
         for (var mp : players) {
-            if (mp != sender) {
+            if (mp != excludePlayer) {
                 NetworkHandler.INSTANCE.sendTo(packet, mp);
             }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void broadcastToAll(String name, CachedEmote cached) {
+        var packet = new PacketEmoteBroadcast(
+            name,
+            cached.checksum,
+            cached.sender,
+            cached.type,
+            cached.category,
+            cached.isIcon);
+        List<EntityPlayerMP> players = MinecraftServer.getServer()
+            .getConfigurationManager().playerEntityList;
+        for (var mp : players) {
+            NetworkHandler.INSTANCE.sendTo(packet, mp);
         }
     }
 
@@ -221,6 +260,103 @@ public class EmoteServerHandler {
     private static boolean isValidName(String name) {
         if (name == null || name.isEmpty() || name.length() > 32) return false;
         return name.matches("[a-zA-Z0-9_-]+");
+    }
+
+    // -- Server packs --
+
+    public static void loadServerPacks() {
+        var packs = EmojiPackLoader.loadServerPacks();
+        int count = 0;
+        for (var pack : packs) {
+            String iconName = pack.iconEmojiName;
+            if (iconName == null && !pack.entries.isEmpty()) {
+                iconName = pack.entries.get(0).name;
+            }
+
+            for (var entry : pack.entries) {
+                try {
+                    byte[] raw = java.nio.file.Files.readAllBytes(entry.imageFile.toPath());
+                    byte[] sanitized = sanitize(raw, false);
+                    if (sanitized == null) {
+                        Minemoticon.LOG.warn("Skipping invalid server pack emoji: {}", entry.name);
+                        continue;
+                    }
+                    String checksum = sha1(sanitized);
+                    boolean isIcon = entry.name.equals(iconName);
+                    emoteCache.put(
+                        entry.name,
+                        new CachedEmote(
+                            checksum,
+                            sanitized,
+                            "",
+                            PacketEmoteBroadcast.TYPE_SERVER_PACK,
+                            pack.displayName,
+                            isIcon));
+                    count++;
+                } catch (Exception e) {
+                    Minemoticon.LOG.error("Failed to load server pack emoji: {}", entry.name, e);
+                }
+            }
+        }
+        Minemoticon.LOG.info("Loaded {} server pack emojis", count);
+    }
+
+    @SuppressWarnings("unchecked")
+    public static int reloadServerPacks() {
+        // Clear old server pack entries
+        emoteCache.values()
+            .removeIf(c -> c.type == PacketEmoteBroadcast.TYPE_SERVER_PACK);
+
+        // Reload
+        loadServerPacks();
+
+        // Notify all clients: clear + re-broadcast
+        List<EntityPlayerMP> players = MinecraftServer.getServer()
+            .getConfigurationManager().playerEntityList;
+        var clearPacket = new PacketServerPackClear();
+        for (var mp : players) {
+            NetworkHandler.INSTANCE.sendTo(clearPacket, mp);
+        }
+
+        int count = 0;
+        for (var entry : emoteCache.entrySet()) {
+            if (entry.getValue().type == PacketEmoteBroadcast.TYPE_SERVER_PACK) {
+                broadcastToAll(entry.getKey(), entry.getValue());
+                count++;
+            }
+        }
+        return count;
+    }
+
+    public static void sendServerPacksToPlayer(EntityPlayerMP player) {
+        for (var entry : emoteCache.entrySet()) {
+            if (entry.getValue().type == PacketEmoteBroadcast.TYPE_SERVER_PACK) {
+                var cached = entry.getValue();
+                var packet = new PacketEmoteBroadcast(
+                    entry.getKey(),
+                    cached.checksum,
+                    "",
+                    PacketEmoteBroadcast.TYPE_SERVER_PACK,
+                    cached.category,
+                    cached.isIcon);
+                NetworkHandler.INSTANCE.sendTo(packet, player);
+            }
+        }
+    }
+
+    // -- One-off emojis (API for bridge plugins) --
+
+    public static void registerOneOff(String name, byte[] imageData) {
+        byte[] sanitized = sanitize(imageData);
+        if (sanitized == null) {
+            Minemoticon.LOG.warn("Failed to register one-off emote: {} (invalid image)", name);
+            return;
+        }
+        String checksum = sha1(sanitized);
+        var cached = new CachedEmote(checksum, sanitized, "", PacketEmoteBroadcast.TYPE_ONE_OFF, "", false);
+        emoteCache.put(name, cached);
+        broadcastToAll(name, cached);
+        Minemoticon.debug("Registered one-off emote: {} (checksum {})", name, checksum);
     }
 
     public static String sha1(byte[] data) {
