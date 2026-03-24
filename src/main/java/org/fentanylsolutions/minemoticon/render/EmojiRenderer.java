@@ -82,22 +82,28 @@ public class EmojiRenderer {
 
     public static void renderQuad(RenderableEmoji emoji, float x, float y) {
         var texLoc = emoji.getResourceLocation();
+        if (texLoc == null) return;
         Minecraft.getMinecraft()
             .getTextureManager()
             .bindTexture(texLoc);
 
-        // Reset color to white so the emoji texture isn't tinted
         GL11.glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+
+        float[] uv = emoji.getUV();
+        float u0 = uv != null ? uv[0] : 0;
+        float v0 = uv != null ? uv[1] : 0;
+        float u1 = uv != null ? uv[2] : 1;
+        float v1 = uv != null ? uv[3] : 1;
 
         float top = y;
         GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-        GL11.glTexCoord2f(0, 0);
+        GL11.glTexCoord2f(u0, v0);
         GL11.glVertex3f(x, top, 0);
-        GL11.glTexCoord2f(0, 1);
+        GL11.glTexCoord2f(u0, v1);
         GL11.glVertex3f(x, top + EMOJI_SIZE, 0);
-        GL11.glTexCoord2f(1, 0);
+        GL11.glTexCoord2f(u1, v0);
         GL11.glVertex3f(x + EMOJI_SIZE, top, 0);
-        GL11.glTexCoord2f(1, 1);
+        GL11.glTexCoord2f(u1, v1);
         GL11.glVertex3f(x + EMOJI_SIZE, top + EMOJI_SIZE, 0);
         GL11.glEnd();
     }

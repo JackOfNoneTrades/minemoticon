@@ -13,7 +13,6 @@ import net.minecraft.client.gui.ScaledResolution;
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.api.Emoji;
-import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.lwjgl.input.Mouse;
@@ -39,7 +38,7 @@ public class EmojiPickerGui {
     private final int screenHeight;
 
     private boolean open;
-    private EmojiFromTwitmoji buttonEmoji;
+    private RenderableEmoji buttonEmoji;
     private Emoji hoveredEmoji;
     private String hoveredCategory;
     private List<Object> filteredLines = new ArrayList<>();
@@ -63,7 +62,7 @@ public class EmojiPickerGui {
     private String pendingInsertText;
 
     // Config gear
-    private EmojiFromTwitmoji gearEmoji;
+    private RenderableEmoji gearEmoji;
     private boolean openConfig;
 
     // Panel bounds
@@ -101,10 +100,10 @@ public class EmojiPickerGui {
         buttonY = screenHeight - CELL;
 
         var lookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + EmojiConfig.pickerButtonEmoji + ":");
-        if (lookup instanceof EmojiFromTwitmoji t) buttonEmoji = t;
+        if (lookup instanceof RenderableEmoji r) buttonEmoji = r;
 
         var gearLookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":gear:");
-        if (gearLookup instanceof EmojiFromTwitmoji t) gearEmoji = t;
+        if (gearLookup instanceof RenderableEmoji r) gearEmoji = r;
 
         gearX = panelX + panelW - PAD - CELL;
         gearY = panelY + PAD;

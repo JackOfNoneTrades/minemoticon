@@ -8,6 +8,7 @@ public class CpalParser {
     private final int[] colors; // ARGB format
 
     public CpalParser(ByteBuffer cpal) {
+        int base = cpal.position();
         cpal.getShort(); // version
         int numPaletteEntries = cpal.getShort() & 0xFFFF;
         int numPalettes = cpal.getShort() & 0xFFFF;
@@ -19,7 +20,7 @@ public class CpalParser {
 
         // Read color records (BGRA order in the file)
         colors = new int[numColorRecords];
-        cpal.position(cpal.arrayOffset() + colorRecordOffset);
+        cpal.position(base + colorRecordOffset);
         for (int i = 0; i < numColorRecords; i++) {
             int b = cpal.get() & 0xFF;
             int g = cpal.get() & 0xFF;

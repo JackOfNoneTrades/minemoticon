@@ -15,10 +15,13 @@ import java.util.Map;
 import java.util.Scanner;
 
 import org.fentanylsolutions.minemoticon.api.Emoji;
+import org.fentanylsolutions.minemoticon.api.EmojiFromAtlas;
 import org.fentanylsolutions.minemoticon.api.EmojiFromFont;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.colorfont.AtlasBuilder;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
+import org.fentanylsolutions.minemoticon.colorfont.EmojiAtlas;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -50,6 +53,8 @@ public class ClientEmojiHandler {
     public static boolean error = false;
     private static volatile boolean ready = false;
     private static ColorFont colorFont;
+    private static EmojiAtlas emojiAtlas;
+    private static String fontHash;
 
     public static boolean isReady() {
         return ready;
@@ -146,13 +151,28 @@ public class ClientEmojiHandler {
     }
 
     private static void loadColorFont() {
-        try (var stream = ClientEmojiHandler.class.getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
-            if (stream != null) {
-                colorFont = ColorFont.load(stream);
-                Minemoticon.LOG.info("Loaded Twemoji COLR font");
-            } else {
-                Minemoticon.LOG.warn("Twemoji font not found in resources, falling back to CDN");
+        try {
+            // Read font bytes for both loading and hashing
+            byte[] fontBytes;
+            try (var stream = ClientEmojiHandler.class.getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
+                if (stream == null) {
+                    Minemoticon.LOG.warn("Twemoji font not found in resources, falling back to CDN");
+                    return;
+                }
+                var baos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = stream.read(buf)) != -1) baos.write(buf, 0, n);
+                fontBytes = baos.toByteArray();
             }
+
+            colorFont = ColorFont.load(new java.io.ByteArrayInputStream(fontBytes));
+            fontHash = AtlasBuilder.sha1(fontBytes);
+            Minemoticon.LOG.info("Loaded Twemoji COLR font (hash: {})", fontHash);
+
+            // Also check user fonts dir
+            var fontsDir = new File("config/minemoticon/fonts");
+            fontsDir.mkdirs();
         } catch (Exception e) {
             Minemoticon.LOG.warn("Failed to load Twemoji font, falling back to CDN", e);
         }
@@ -236,6 +256,34 @@ public class ClientEmojiHandler {
         try {
             var root = new JsonParser().parse(jsonText);
 
+            // First pass: collect glyph entries for atlas building
+            var glyphEntries = new ArrayList<AtlasBuilder.GlyphEntry>();
+            boolean useAtlas = colorFont != null && fontHash != null;
+
+            // Build atlas before creating emoji objects
+            if (useAtlas) {
+                // Quick scan to collect all glyphs the font supports
+                for (JsonElement element : root.getAsJsonArray()) {
+                    var obj = element.getAsJsonObject();
+                    if (!obj.get("has_img_twitter")
+                        .getAsBoolean()) continue;
+                    if ("Component".equals(
+                        obj.get("category")
+                            .getAsString()))
+                        continue;
+                    String unified = obj.get("unified")
+                        .getAsString();
+                    int[] codepoints = java.util.Arrays.stream(unified.split("-"))
+                        .mapToInt(hex -> Integer.parseInt(hex, 16))
+                        .toArray();
+                    if (codepoints.length > 0 && colorFont.hasGlyph(codepoints[0])) {
+                        glyphEntries.add(new AtlasBuilder.GlyphEntry(unified, codepoints));
+                    }
+                }
+                emojiAtlas = AtlasBuilder.loadOrBuild(colorFont, fontHash, glyphEntries);
+            }
+
+            // Second pass: create emoji objects
             for (JsonElement element : root.getAsJsonArray()) {
                 var obj = element.getAsJsonObject();
                 if (!obj.get("has_img_twitter")
@@ -257,22 +305,19 @@ public class ClientEmojiHandler {
                     .getAsString();
                 String unicodeStr = unifiedToString(unified);
 
-                // Parse codepoints for font rendering
-                int[] codepoints = unified.chars()
-                    .count() > 0 ? java.util.Arrays.stream(unified.split("-"))
-                        .mapToInt(hex -> Integer.parseInt(hex, 16))
-                        .toArray() : new int[0];
+                int[] codepoints = java.util.Arrays.stream(unified.split("-"))
+                    .mapToInt(hex -> Integer.parseInt(hex, 16))
+                    .toArray();
 
-                // Try font rendering first, fall back to CDN download
                 Emoji emoji;
-                if (colorFont != null && codepoints.length > 0 && colorFont.hasGlyph(codepoints[0])) {
-                    var fontEmoji = new EmojiFromFont(colorFont, codepoints);
-                    fontEmoji.name = emojiName;
-                    fontEmoji.location = location;
-                    fontEmoji.sort = sort;
-                    fontEmoji.category = category;
-                    fontEmoji.unicodeString = unicodeStr;
-                    emoji = fontEmoji;
+                if (useAtlas && codepoints.length > 0 && colorFont.hasGlyph(codepoints[0])) {
+                    var atlasEmoji = new EmojiFromAtlas(emojiAtlas, unified);
+                    atlasEmoji.name = emojiName;
+                    atlasEmoji.location = location;
+                    atlasEmoji.sort = sort;
+                    atlasEmoji.category = category;
+                    atlasEmoji.unicodeString = unicodeStr;
+                    emoji = atlasEmoji;
                 } else {
                     var cdnEmoji = new EmojiFromTwitmoji();
                     cdnEmoji.name = emojiName;
@@ -326,7 +371,7 @@ public class ClientEmojiHandler {
     }
 
     private static boolean isStockEmoji(Emoji e) {
-        return e instanceof EmojiFromTwitmoji || e instanceof EmojiFromFont;
+        return e instanceof EmojiFromTwitmoji || e instanceof EmojiFromFont || e instanceof EmojiFromAtlas;
     }
 
     private static void clearTwemojiData() {

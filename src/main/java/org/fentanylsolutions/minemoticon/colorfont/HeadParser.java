@@ -8,9 +8,10 @@ public class HeadParser {
     public final int indexToLocFormat; // 0 = short, 1 = long
 
     public HeadParser(ByteBuffer head) {
-        head.position(18);
+        int base = head.position();
+        head.position(base + 18);
         unitsPerEm = head.getShort() & 0xFFFF;
-        head.position(50);
+        head.position(base + 50);
         indexToLocFormat = head.getShort();
     }
 }
