@@ -11,6 +11,8 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 @Mixin(GuiTextField.class)
 public class MixinGuiTextField {
 
+    private static final int MINEMOTICON$MAX_EMOJI_SEQUENCE_LENGTH = 32;
+
     @Shadow
     private String text;
 
@@ -62,12 +64,23 @@ public class MixinGuiTextField {
         return amount;
     }
 
+    @ModifyVariable(method = "setCursorPosition", at = @At("HEAD"), argsOnly = true)
+    private int minemoticon$snapCursorPositionToEmojiBoundary(int position) {
+        return snapToEmojiBoundary(position, cursorPosition);
+    }
+
+    @ModifyVariable(method = "setSelectionPos", at = @At("HEAD"), argsOnly = true)
+    private int minemoticon$snapSelectionPositionToEmojiBoundary(int position) {
+        return snapToEmojiBoundary(position, selectionEnd);
+    }
+
     // Walk backwards from pos to find the start of a Unicode emoji sequence ending at pos
     private int findEmojiStart(String text, int pos) {
         if (pos <= 0 || pos > text.length()) return -1;
 
-        // Try progressively longer substrings ending at pos (up to 8 chars for long emoji sequences)
-        for (int len = 2; len <= Math.min(8, pos); len++) {
+        // Prefer the longest emoji ending at pos so we do not stop on trailing components
+        // inside a larger ZWJ ligature.
+        for (int len = Math.min(MINEMOTICON$MAX_EMOJI_SEQUENCE_LENGTH, pos); len >= 2; len--) {
             int start = pos - len;
             if (start < 0) break;
             String candidate = text.substring(start, pos);
@@ -123,5 +136,69 @@ public class MixinGuiTextField {
         }
 
         return pos;
+    }
+
+    private int snapToEmojiBoundary(int position, int previousPosition) {
+        if (text == null || text.isEmpty()) return position;
+        if (position <= 0 || position >= text.length()) return position;
+
+        int[] bounds = findContainingEmojiBounds(text, position);
+        if (bounds == null) {
+            return position;
+        }
+
+        int start = bounds[0];
+        int end = bounds[1];
+
+        if (Math.abs(position - previousPosition) == 1) {
+            return position < previousPosition ? start : end;
+        }
+
+        int midpoint = start + (end - start) / 2;
+        return position <= midpoint ? start : end;
+    }
+
+    private int[] findContainingEmojiBounds(String text, int pos) {
+        if (pos <= 0 || pos >= text.length()) return null;
+
+        int scanStart = Math.max(0, pos - MINEMOTICON$MAX_EMOJI_SEQUENCE_LENGTH);
+        int bestStart = -1;
+        int bestEnd = -1;
+
+        for (int start = pos - 1; start >= scanStart; start--) {
+            var keys = ClientEmojiHandler.UNICODE_KEYS_BY_CHAR.get(text.charAt(start));
+            if (keys == null) {
+                continue;
+            }
+
+            for (String key : keys) { // sorted longest-first
+                int end = start + key.length();
+                if (end <= pos || end > text.length()) {
+                    continue;
+                }
+                if (text.startsWith(key, start)) {
+                    if (bestStart < 0 || end - start > bestEnd - bestStart) {
+                        bestStart = start;
+                        bestEnd = end;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (bestStart >= 0 && pos > bestStart && pos < bestEnd) {
+            return new int[] { bestStart, bestEnd };
+        }
+
+        if (Character.isLowSurrogate(text.charAt(pos)) && Character.isHighSurrogate(text.charAt(pos - 1))) {
+            return new int[] { pos - 1, pos + 1 };
+        }
+
+        char current = text.charAt(pos);
+        if (current == '\uFE0F' || current == '\uFE0E') {
+            return new int[] { pos - 1, pos + 1 };
+        }
+
+        return null;
     }
 }
