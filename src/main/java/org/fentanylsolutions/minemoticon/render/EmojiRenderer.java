@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.Tessellator;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.api.Emoji;
@@ -101,16 +102,15 @@ public class EmojiRenderer {
         float v1 = uv != null ? uv[3] : 1;
 
         float top = y;
-        GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-        GL11.glTexCoord2f(u0, v0);
-        GL11.glVertex3f(x, top, 0);
-        GL11.glTexCoord2f(u0, v1);
-        GL11.glVertex3f(x, top + EMOJI_SIZE, 0);
-        GL11.glTexCoord2f(u1, v0);
-        GL11.glVertex3f(x + EMOJI_SIZE, top, 0);
-        GL11.glTexCoord2f(u1, v1);
-        GL11.glVertex3f(x + EMOJI_SIZE, top + EMOJI_SIZE, 0);
-        GL11.glEnd();
+
+        Tessellator tessellator = Tessellator.instance;
+
+        tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+        tessellator.addVertexWithUV(x, top, 0, u0, v0);
+        tessellator.addVertexWithUV(x, top + EMOJI_SIZE, 0, u0, v1);
+        tessellator.addVertexWithUV(x + EMOJI_SIZE, top, 0, u1, v0);
+        tessellator.addVertexWithUV(x + EMOJI_SIZE, top + EMOJI_SIZE, 0, u1, v1);
+        tessellator.draw();
 
         if (!blendWasEnabled) {
             GL11.glDisable(GL11.GL_BLEND);

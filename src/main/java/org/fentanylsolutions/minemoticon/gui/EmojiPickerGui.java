@@ -9,6 +9,7 @@ import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.gui.ScaledResolution;
+import net.minecraft.client.renderer.Tessellator;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
@@ -232,16 +233,16 @@ public class EmojiPickerGui {
                 float size = gfs - 3;
                 float ex = gfx + (gfs - size) / 2.0f;
                 float ey = gfy + (gfs - size) / 2.0f;
-                GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-                GL11.glTexCoord2f(gu0, gv0);
-                GL11.glVertex3f(ex, ey, 0);
-                GL11.glTexCoord2f(gu0, gv1);
-                GL11.glVertex3f(ex, ey + size, 0);
-                GL11.glTexCoord2f(gu1, gv0);
-                GL11.glVertex3f(ex + size, ey, 0);
-                GL11.glTexCoord2f(gu1, gv1);
-                GL11.glVertex3f(ex + size, ey + size, 0);
-                GL11.glEnd();
+
+                Tessellator tessellator = Tessellator.instance;
+
+                tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+                tessellator.addVertexWithUV(ex, ey, 0, gu0, gv0);
+                tessellator.addVertexWithUV(ex, ey + size, 0, gu0, gv1);
+                tessellator.addVertexWithUV(ex + size, ey, 0, gu1, gv0);
+                tessellator.addVertexWithUV(ex + size, ey + size, 0, gu1, gv1);
+                tessellator.draw();
+
                 GL11.glColor4f(1, 1, 1, 1);
             }
 
@@ -429,16 +430,15 @@ public class EmojiPickerGui {
 
         float size = EmojiRenderer.EMOJI_SIZE;
         float top = buttonY - 1.0f;
-        GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-        GL11.glTexCoord2f(u0, v0);
-        GL11.glVertex3f(buttonX, top, 0);
-        GL11.glTexCoord2f(u0, v1);
-        GL11.glVertex3f(buttonX, top + size, 0);
-        GL11.glTexCoord2f(u1, v0);
-        GL11.glVertex3f(buttonX + size, top, 0);
-        GL11.glTexCoord2f(u1, v1);
-        GL11.glVertex3f(buttonX + size, top + size, 0);
-        GL11.glEnd();
+
+        Tessellator tessellator = Tessellator.instance;
+
+        tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+        tessellator.addVertexWithUV(buttonX, top, 0, u0, v0);
+        tessellator.addVertexWithUV(buttonX, top + size, 0, u0, v1);
+        tessellator.addVertexWithUV(buttonX + size, top, 0, u1, v0);
+        tessellator.addVertexWithUV(buttonX + size, top + size, 0, u1, v1);
+        tessellator.draw();
 
         GL11.glColor4f(1, 1, 1, 1);
     }
