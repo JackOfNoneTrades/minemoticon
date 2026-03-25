@@ -19,16 +19,19 @@ import net.minecraft.client.gui.ScaledResolution;
 import net.minecraft.util.ResourceLocation;
 
 import org.fentanylsolutions.fentlib.util.FileUtil;
+import org.fentanylsolutions.fentlib.util.drop.DropListener;
+import org.fentanylsolutions.fentlib.util.drop.WindowDropTarget;
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiPackLoader;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.api.FileTexture;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
+import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
 
-public class PackManagementScreen extends GuiScreen {
+public class PackManagementScreen extends GuiScreen implements DropListener {
 
     private static final int BTN_NEW_PACK = 99;
     private static final int BTN_OPEN_FOLDER = 100;
@@ -80,6 +83,9 @@ public class PackManagementScreen extends GuiScreen {
     private int statusColor = 0xFFB0B0B0;
     private long statusUntilMs;
     private String pendingNewPackName;
+    private volatile boolean dragDropActive;
+    private volatile float dragDropSdlX = -1.0F;
+    private volatile float dragDropSdlY = -1.0F;
 
     public PackManagementScreen(GuiScreen parent) {
         this.parent = parent;
@@ -88,6 +94,7 @@ public class PackManagementScreen extends GuiScreen {
     @Override
     public void initGui() {
         buttonList.clear();
+        Keyboard.enableRepeatEvents(true);
 
         listX = PANEL_MARGIN;
         listY = HEADER_TITLE_Y + fontRendererObj.FONT_HEIGHT + HEADER_BOTTOM_PAD;
@@ -105,6 +112,9 @@ public class PackManagementScreen extends GuiScreen {
             .add(new GuiButton(BTN_OPEN_FOLDER, startX + btnW + gap, bottomY, btnW, 20, "\uD83D\uDCC2 Packs Folder"));
         buttonList.add(new GuiButton(BTN_RELOAD, startX + (btnW + gap) * 2, bottomY, btnW, 20, "\uD83D\uDD04 Reload"));
         buttonList.add(new GuiButton(BTN_BACK, startX + (btnW + gap) * 3, bottomY, btnW, 20, "Back"));
+
+        WindowDropTarget.register();
+        WindowDropTarget.addListener(this);
 
         reloadPackCards(null, null);
         if (pendingNewPackName != null) {
@@ -138,6 +148,7 @@ public class PackManagementScreen extends GuiScreen {
         drawListBackground();
         renderPackCards(mouseX, mouseY);
         renderListScrollbar(mouseX, mouseY);
+        renderDragDropOverlay();
         renderStatus();
 
         super.drawScreen(mouseX, mouseY, partialTicks);
@@ -164,6 +175,16 @@ public class PackManagementScreen extends GuiScreen {
         if (button.id == BTN_RELOAD) {
             reloadClientPacks(null, null, "Reloaded client packs", 0xFF80FF80);
         }
+    }
+
+    @Override
+    public void onGuiClosed() {
+        Keyboard.enableRepeatEvents(false);
+        WindowDropTarget.removeListener(this);
+        dragDropActive = false;
+        dragDropSdlX = -1.0F;
+        dragDropSdlY = -1.0F;
+        super.onGuiClosed();
     }
 
     @Override
@@ -358,6 +379,58 @@ public class PackManagementScreen extends GuiScreen {
             return;
         }
         drawCenteredString(fontRendererObj, statusText, width / 2, height - 36, statusColor);
+    }
+
+    private void renderDragDropOverlay() {
+        if (!dragDropActive) {
+            return;
+        }
+
+        enableScissor(listX, listY, listW + 1, listH);
+
+        float[] guiCoords = WindowDropTarget.sdlToGuiCoords(dragDropSdlX, dragDropSdlY);
+        int dragX = Math.round(guiCoords[0]);
+        int dragY = Math.round(guiCoords[1]);
+        PackCard hoveredCard = findVisibleCard(dragX, dragY);
+
+        Gui.drawRect(listX, listY, listX + listW + 1, listY + listH, 0x18000000);
+
+        if (packCards.isEmpty()) {
+            drawCenteredString(
+                fontRendererObj,
+                "Create a pack first, then drop emoji files here.",
+                width / 2,
+                listY + 8,
+                0xFFD8D8D8);
+            GL11.glDisable(GL11.GL_SCISSOR_TEST);
+            return;
+        }
+
+        if (hoveredCard != null) {
+            Gui.drawRect(
+                hoveredCard.emojiBoxX,
+                hoveredCard.emojiBoxY,
+                hoveredCard.emojiBoxX + hoveredCard.emojiBoxW,
+                hoveredCard.emojiBoxY + hoveredCard.emojiBoxH,
+                0x285EA35E);
+            drawOutline(
+                hoveredCard.emojiBoxX,
+                hoveredCard.emojiBoxY,
+                hoveredCard.emojiBoxW,
+                hoveredCard.emojiBoxH,
+                0xA05EA35E);
+            drawCenteredString(
+                fontRendererObj,
+                trimToWidthWithEllipsis("Drop to add to " + hoveredCard.getCardTitle(), hoveredCard.emojiBoxW - 8),
+                hoveredCard.emojiBoxX + hoveredCard.emojiBoxW / 2,
+                hoveredCard.emojiBoxY + hoveredCard.emojiBoxH + 4,
+                0xFFD8FFD8);
+            GL11.glDisable(GL11.GL_SCISSOR_TEST);
+            return;
+        }
+
+        drawCenteredString(fontRendererObj, "Drop an emoji file onto a pack.", width / 2, listY + 8, 0xFFD8D8D8);
+        GL11.glDisable(GL11.GL_SCISSOR_TEST);
     }
 
     private void renderTooltip(int mouseX, int mouseY, String text) {
@@ -643,29 +716,7 @@ public class PackManagementScreen extends GuiScreen {
         }
 
         File source = result.getFile();
-        if (source == null || !EmojiPackLoader.isSupportedEmojiFile(source)) {
-            showStatus("Selected file is not a supported emoji image", 0xFFFF8080);
-            return;
-        }
-
-        String extension = getExtension(source.getName());
-        String baseName = sanitizeEmojiName(stripExtension(source.getName()));
-        if (baseName.isEmpty()) {
-            baseName = "emoji";
-        }
-
-        File target = uniqueEmojiFile(card.folder, baseName, extension, null);
-        try {
-            Files.copy(source.toPath(), target.toPath());
-            reloadClientPacks(
-                card.folder.getAbsolutePath(),
-                stripExtension(target.getName()),
-                "Added " + stripExtension(target.getName()),
-                0xFF80FF80);
-        } catch (IOException e) {
-            Minemoticon.LOG.error("Failed to add emoji {} to {}", source, card.folder.getName(), e);
-            showStatus("Failed to add emoji", 0xFFFF8080);
-        }
+        addEmojiFileToPack(card, source);
     }
 
     private void createNewPack(String requestedDisplayName) {
@@ -802,6 +853,32 @@ public class PackManagementScreen extends GuiScreen {
         statusUntilMs = System.currentTimeMillis() + STATUS_DURATION_MS;
     }
 
+    private void addEmojiFileToPack(PackCard card, File source) {
+        if (source == null || !EmojiPackLoader.isSupportedEmojiFile(source)) {
+            showStatus("Selected file is not a supported emoji image", 0xFFFF8080);
+            return;
+        }
+
+        String extension = getExtension(source.getName());
+        String baseName = sanitizeEmojiName(stripExtension(source.getName()));
+        if (baseName.isEmpty()) {
+            baseName = "emoji";
+        }
+
+        File target = uniqueEmojiFile(card.folder, baseName, extension, null);
+        try {
+            Files.copy(source.toPath(), target.toPath());
+            reloadClientPacks(
+                card.folder.getAbsolutePath(),
+                stripExtension(target.getName()),
+                "Added " + stripExtension(target.getName()) + " to " + card.getCardTitle(),
+                0xFF80FF80);
+        } catch (IOException e) {
+            Minemoticon.LOG.error("Failed to add emoji {} to {}", source, card.folder.getName(), e);
+            showStatus("Failed to add emoji", 0xFFFF8080);
+        }
+    }
+
     private static File uniqueEmojiFile(File folder, String baseName, String extension, File existingFile) {
         String normalizedBase = sanitizeEmojiName(baseName);
         if (normalizedBase.isEmpty()) {
@@ -897,6 +974,7 @@ public class PackManagementScreen extends GuiScreen {
 
         private int emojiScrollRows;
         private PackEmojiItem selectedEmoji;
+        private boolean pendingSelectedEmojiFieldFocus;
 
         private boolean visible;
         private int x;
@@ -996,6 +1074,12 @@ public class PackManagementScreen extends GuiScreen {
             selectedEmojiField.width = renameFieldW;
             selectedEmojiField.height = FIELD_H;
             selectedEmojiField.setEnabled(selectedEmoji != null);
+            if (pendingSelectedEmojiFieldFocus && selectedEmoji != null) {
+                selectedEmojiField.setFocused(true);
+                selectedEmojiField.setCursorPositionEnd();
+                selectedEmojiField.setSelectionPos(0);
+                pendingSelectedEmojiFieldFocus = false;
+            }
 
             return true;
         }
@@ -1283,7 +1367,7 @@ public class PackManagementScreen extends GuiScreen {
         void selectEmoji(PackEmojiItem emoji) {
             selectedEmoji = emoji;
             selectedEmojiField.setText(emoji.name);
-            selectedEmojiField.setFocused(true);
+            pendingSelectedEmojiFieldFocus = true;
 
             int cols = getEmojiCols();
             int row = emojis.indexOf(emoji) / cols;
@@ -1298,6 +1382,7 @@ public class PackManagementScreen extends GuiScreen {
             selectedEmoji = null;
             selectedEmojiField.setText("");
             selectedEmojiField.setFocused(false);
+            pendingSelectedEmojiFieldFocus = false;
         }
 
         boolean hasSelectedEmoji() {
@@ -1517,6 +1602,7 @@ public class PackManagementScreen extends GuiScreen {
         @Override
         public void initGui() {
             buttonList.clear();
+            Keyboard.enableRepeatEvents(true);
 
             int panelW = 220;
             int panelH = 82;
@@ -1607,6 +1693,12 @@ public class PackManagementScreen extends GuiScreen {
             return false;
         }
 
+        @Override
+        public void onGuiClosed() {
+            Keyboard.enableRepeatEvents(false);
+            super.onGuiClosed();
+        }
+
         private void submit() {
             String requestedName = nameField.getText()
                 .trim();
@@ -1668,6 +1760,62 @@ public class PackManagementScreen extends GuiScreen {
 
     private static boolean isInside(int mouseX, int mouseY, int x, int y, int w, int h) {
         return mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+    }
+
+    @Override
+    public void onDragBegin() {
+        if (Minecraft.getMinecraft().currentScreen != this) {
+            return;
+        }
+        dragDropActive = true;
+        dragDropSdlX = -1.0F;
+        dragDropSdlY = -1.0F;
+    }
+
+    @Override
+    public void onDragPosition(float sdlX, float sdlY) {
+        dragDropSdlX = sdlX;
+        dragDropSdlY = sdlY;
+    }
+
+    @Override
+    public void onDragComplete(WindowDropTarget.DropResult result) {
+        dragDropActive = false;
+        dragDropSdlX = result.getSdlX();
+        dragDropSdlY = result.getSdlY();
+
+        if (Minecraft.getMinecraft().currentScreen != this) {
+            return;
+        }
+
+        if (!result.isFileDrop()) {
+            if (result.isTextDrop()) {
+                showStatus("Drop a supported emoji file, not text", 0xFFFF8080);
+            }
+            return;
+        }
+
+        File source = new File(result.getFilePath());
+        if (!EmojiPackLoader.isSupportedEmojiFile(source)) {
+            showStatus("Dropped file is not a supported emoji image", 0xFFFF8080);
+            return;
+        }
+
+        if (packCards.isEmpty()) {
+            showStatus("Create a pack first, then drop emoji files onto it", 0xFFFF8080);
+            return;
+        }
+
+        float[] guiCoords = WindowDropTarget.sdlToGuiCoords(result.getSdlX(), result.getSdlY());
+        int dropX = Math.round(guiCoords[0]);
+        int dropY = Math.round(guiCoords[1]);
+        PackCard targetCard = findVisibleCard(dropX, dropY);
+        if (targetCard == null) {
+            showStatus("Drop an emoji file onto a visible pack", 0xFFFF8080);
+            return;
+        }
+
+        addEmojiFileToPack(targetCard, source);
     }
 
     private final class FocusableField {

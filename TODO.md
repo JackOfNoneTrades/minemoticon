@@ -1,3 +1,3 @@
 * Animated webp
-* Kotmatross pull
 * emoji tooltips in chat
+* remove packs & reload packs button in main gui screen
