@@ -55,6 +55,10 @@ public final class EmojiImageLoader {
             return readGif(rawBytes);
         }
 
+        if (looksLikeAnimatedWebp(rawBytes, sourceName)) {
+            return readAnimatedWebp(rawBytes);
+        }
+
         BufferedImage image = decodeStaticImage(rawBytes, sourceName);
         if (image == null) {
             throw new IOException("Unsupported emoji image format");
@@ -73,6 +77,20 @@ public final class EmojiImageLoader {
 
         if (looksLikeGif(rawBytes, sourceName)) {
             EmojiImageData imageData = readGif(rawBytes);
+            validateDimensions(imageData, enforceMaxDimension, maxDimension);
+            validateAtlasSize(imageData);
+
+            if (imageData.isAnimated()) {
+                return new SanitizedEmojiData(
+                    EmojiAnimationCodec.encode(imageData),
+                    EmojiAnimationCodec.FILE_EXTENSION);
+            }
+
+            return new SanitizedEmojiData(encodeCleanPng(imageData.getAtlasImage()), STATIC_FILE_EXTENSION);
+        }
+
+        if (looksLikeAnimatedWebp(rawBytes, sourceName)) {
+            EmojiImageData imageData = readAnimatedWebp(rawBytes);
             validateDimensions(imageData, enforceMaxDimension, maxDimension);
             validateAtlasSize(imageData);
 
@@ -125,13 +143,22 @@ public final class EmojiImageLoader {
 
     private static EmojiImageData readGif(byte[] gifBytes) throws IOException {
         GifUtil.GifData gif = GifUtil.readGif(gifBytes);
-        int frameCount = gif.getFrameCount();
+        return readAnimatedImage(gif, "GIF");
+    }
+
+    private static EmojiImageData readAnimatedWebp(byte[] webpBytes) throws IOException {
+        GifUtil.GifData webp = WebpUtil.readAnimated(webpBytes);
+        return readAnimatedImage(webp, "WebP");
+    }
+
+    private static EmojiImageData readAnimatedImage(GifUtil.GifData animation, String formatName) throws IOException {
+        int frameCount = animation.getFrameCount();
         if (frameCount <= 0) {
-            throw new IOException("GIF has no frames");
+            throw new IOException(formatName + " has no frames");
         }
 
         if (frameCount == 1) {
-            return EmojiImageData.fromStatic(gif.getFrame(0));
+            return EmojiImageData.fromStatic(animation.getFrame(0));
         }
 
         int frameWidth = 0;
@@ -140,15 +167,15 @@ public final class EmojiImageLoader {
         int[] delaysMs = new int[frameCount];
 
         for (int i = 0; i < frameCount; i++) {
-            BufferedImage frame = copyToArgb(gif.getFrame(i));
+            BufferedImage frame = copyToArgb(animation.getFrame(i));
             frames[i] = frame;
             frameWidth = Math.max(frameWidth, frame.getWidth());
             frameHeight = Math.max(frameHeight, frame.getHeight());
-            delaysMs[i] = gif.getDelayMs(i);
+            delaysMs[i] = animation.getDelayMs(i);
         }
 
         if (frameWidth <= 0 || frameHeight <= 0) {
-            throw new IOException("GIF has invalid frame dimensions");
+            throw new IOException(formatName + " has invalid frame dimensions");
         }
 
         int framesPerRow = Math.max(1, Math.min(frameCount, MAX_ATLAS_SIDE / frameWidth));
@@ -238,6 +265,10 @@ public final class EmojiImageLoader {
             && rawBytes[9] == 'E'
             && rawBytes[10] == 'B'
             && rawBytes[11] == 'P';
+    }
+
+    private static boolean looksLikeAnimatedWebp(byte[] rawBytes, String sourceName) {
+        return looksLikeWebp(rawBytes, sourceName) && WebpUtil.isAnimated(rawBytes);
     }
 
     private static boolean hasMagic(byte[] rawBytes, String magic) {
