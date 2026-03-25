@@ -4,7 +4,7 @@
 ![logo](images/logo.png)
 -->
 
-Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, emoji picker, autocomplete, multiplayer sharing.
+Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, animated custom emojis, picker, autocomplete, multiplayer sharing.
 
 [![hub](images/badges/github.png)](https://github.com/JackOfNoneTrades/minemoticon/releases)
 [![maven](images/badges/maven.png)](https://maven.fentanylsolutions.org/#/releases/org/fentanylsolutions/minemoticon)
@@ -22,9 +22,9 @@ Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, emoji picker, 
 ### Features
 
 * **Stock emojis** from [Twemoji](https://github.com/twitter/twemoji).
-* **Custom emoji packs** from local folders. Drop PNGs, JPGs, QOI, or WebP files into `config/minemoticon/packs/<packname>/`. Supports `pack.meta` for display names and icons.
-* **Server emoji packs** synced to clients on join. Add pack folders in `config/minemoticon/server_packs/`. Use `/reload_emojis` to reload packs on a live server.
-* **Multiplayer emote sharing**. If enabled, the server proxies user client emojis to other clients. Clients can refuse third party emojis.
+* **Custom emoji packs** from local folders. Drop PNGs, JPGs, GIFs, QOI, or WebP files into `config/minemoticon/packs/<packname>/`. Supports `pack.meta` for display names and icons.
+* **Server emoji packs** synced to clients on join. Add pack folders in `config/minemoticon/server_packs/`. Animated GIF emojis are supported. Use `/reload_emojis` to reload packs on a live server.
+* **Multiplayer emote sharing**. If enabled, the server proxies user client emojis to other clients, including animated custom emojis. Clients can refuse third party emojis.
 * **Emoji picker** in chat with categories/packs and search.
 * **Autocomplete suggestions** when typing `:emo...`.
 * **Unicode emoji input**. Paste `☃️` and it renders as Twemoji. Also supports `:colon:` syntax.
@@ -44,7 +44,7 @@ All config lives under `config/minemoticon/`:
 | `server_packs/` | Server emoji packs (same format, synced to clients on join)               |
 | `fonts/` | User TTF emoji fonts                                                      |
 | `cache/` | Atlas spritesheets (managed by the mod)                                   |
-| `emote_cache/` | Remote emote images (cleared on disconnect)                               |
+| `emote_cache/` | Remote emote images/animations (cleared on disconnect)                    |
 
 **pack.meta** example:
 ```json

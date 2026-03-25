@@ -1,24 +1,18 @@
 package org.fentanylsolutions.minemoticon.network;
 
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.imageio.ImageIO;
-
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
 
-import org.fentanylsolutions.fentlib.util.QoiUtil;
-import org.fentanylsolutions.fentlib.util.WebpUtil;
 import org.fentanylsolutions.minemoticon.EmojiPackLoader;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.ServerConfig;
+import org.fentanylsolutions.minemoticon.image.EmojiImageLoader;
 
 public class EmoteServerHandler {
 
@@ -160,9 +154,21 @@ public class EmoteServerHandler {
         }
 
         // Sanitize
-        byte[] sanitized = sanitize(raw);
+        byte[] sanitized = sanitize(raw, pending.name, true);
         if (sanitized == null) {
             NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(pending.name, "Invalid image data"), player);
+            return;
+        }
+
+        if (sanitized.length > ServerConfig.maxClientEmoteSize) {
+            NetworkHandler.INSTANCE.sendTo(
+                new PacketEmoteReject(
+                    pending.name,
+                    "Emote too large after sanitizing (" + sanitized.length
+                        + " > "
+                        + ServerConfig.maxClientEmoteSize
+                        + ")"),
+                player);
             return;
         }
 
@@ -187,53 +193,14 @@ public class EmoteServerHandler {
         broadcastEmote(pending.name, cached, player);
     }
 
-    // Try decoding image bytes as PNG/JPG, QOI, or WebP
-    private static BufferedImage decodeImage(byte[] raw) {
-        // Try standard ImageIO first (PNG, JPG, GIF, BMP)
-        try {
-            BufferedImage img = ImageIO.read(new ByteArrayInputStream(raw));
-            if (img != null) return img;
-        } catch (Exception ignored) {}
-
-        // Try QOI
-        try {
-            return QoiUtil.readImage(raw);
-        } catch (Exception ignored) {}
-
-        // Try WebP
-        try {
-            return WebpUtil.readImage(raw);
-        } catch (Exception ignored) {}
-
-        return null;
-    }
-
     private static byte[] sanitize(byte[] raw) {
-        return sanitize(raw, true);
+        return sanitize(raw, null, true);
     }
 
-    private static byte[] sanitize(byte[] raw, boolean enforceMaxDimension) {
+    private static byte[] sanitize(byte[] raw, String sourceName, boolean enforceMaxDimension) {
         try {
-            BufferedImage img = decodeImage(raw);
-            if (img == null) return null;
-
-            if (enforceMaxDimension && (img.getWidth() > MAX_DIMENSION || img.getHeight() > MAX_DIMENSION)) {
-                Minemoticon.debug(
-                    "Emote rejected: dimensions {}x{} exceed max {}",
-                    img.getWidth(),
-                    img.getHeight(),
-                    MAX_DIMENSION);
-                return null;
-            }
-
-            // Re-encode as clean PNG (strips EXIF, ICC, malicious chunks)
-            var clean = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
-            clean.getGraphics()
-                .drawImage(img, 0, 0, null);
-
-            var baos = new ByteArrayOutputStream();
-            ImageIO.write(clean, "png", baos);
-            return baos.toByteArray();
+            return EmojiImageLoader.sanitizeForTransfer(raw, sourceName, enforceMaxDimension, MAX_DIMENSION)
+                .getBytes();
         } catch (Exception e) {
             Minemoticon.LOG.warn("Failed to sanitize emote image", e);
             return null;
@@ -305,7 +272,7 @@ public class EmoteServerHandler {
             for (var entry : pack.entries) {
                 try {
                     byte[] raw = java.nio.file.Files.readAllBytes(entry.imageFile.toPath());
-                    byte[] sanitized = sanitize(raw, false);
+                    byte[] sanitized = sanitize(raw, entry.imageFile.getName(), false);
                     if (sanitized == null) {
                         Minemoticon.LOG.warn("Skipping invalid server pack emoji: {}", entry.name);
                         continue;
@@ -378,7 +345,7 @@ public class EmoteServerHandler {
     // -- One-off emojis (API for bridge plugins) --
 
     public static void registerOneOff(String name, byte[] imageData) {
-        byte[] sanitized = sanitize(imageData);
+        byte[] sanitized = sanitize(imageData, name, true);
         if (sanitized == null) {
             Minemoticon.LOG.warn("Failed to register one-off emote: {} (invalid image)", name);
             return;

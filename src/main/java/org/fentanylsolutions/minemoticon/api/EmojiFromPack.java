@@ -53,6 +53,12 @@ public class EmojiFromPack extends Emoji implements RenderableEmoji {
     }
 
     @Override
+    public float[] getUV() {
+        checkLoad();
+        return texture != null ? texture.getCurrentUV() : null;
+    }
+
+    @Override
     public boolean isLoaded() {
         return texture != null && texture.isUploaded();
     }

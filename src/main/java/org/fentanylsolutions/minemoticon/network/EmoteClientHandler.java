@@ -14,6 +14,7 @@ import org.fentanylsolutions.minemoticon.ServerCapabilities;
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromRemote;
+import org.fentanylsolutions.minemoticon.image.EmojiImageLoader;
 
 public class EmoteClientHandler {
 
@@ -73,9 +74,11 @@ public class EmoteClientHandler {
         }
 
         try {
-            byte[] data = Files.readAllBytes(
-                pack.getImageFile()
-                    .toPath());
+            byte[] data = sanitizePackForTransfer(pack);
+            if (data == null) {
+                Minemoticon.debug("Pack emoji {} could not be sanitized for upload", name);
+                return;
+            }
             int totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
             for (int i = 0; i < totalChunks; i++) {
@@ -121,8 +124,8 @@ public class EmoteClientHandler {
         }
 
         // Check disk cache
-        File cached = new File(CACHE_DIR, checksum + ".png");
-        if (cached.isFile()) {
+        File cached = EmojiImageLoader.findCachedFile(CACHE_DIR, checksum);
+        if (cached != null && cached.isFile()) {
             registerRemoteEmoji(name, checksum, cached, effectiveCategory, namespace, usable, isIcon);
             return;
         }
@@ -171,6 +174,11 @@ public class EmoteClientHandler {
     }
 
     public static void clearRemoteEmojis() {
+        for (var emoji : new java.util.ArrayList<>(ClientEmojiHandler.EMOJI_LOOKUP.values())) {
+            if (emoji instanceof EmojiFromRemote remote) {
+                remote.destroy();
+            }
+        }
         ClientEmojiHandler.EMOJI_LOOKUP.values()
             .removeIf(e -> e instanceof EmojiFromRemote);
         ClientEmojiHandler.EMOJI_LIST.removeIf(e -> e instanceof EmojiFromRemote);
@@ -206,8 +214,9 @@ public class EmoteClientHandler {
 
         // Save to cache
         CACHE_DIR.mkdirs();
-        File cacheFile = new File(CACHE_DIR, checksum + ".png");
         try {
+            String extension = EmojiImageLoader.fileExtensionForPayload(raw);
+            File cacheFile = new File(CACHE_DIR, checksum + extension);
             Files.write(cacheFile.toPath(), raw);
             boolean usable = pendingUsable.getOrDefault(pending.name, false);
             String cat = pendingCategories.getOrDefault(pending.name, "Remote");
@@ -256,12 +265,31 @@ public class EmoteClientHandler {
 
     private static String checksumForPack(EmojiFromPack pack) {
         try {
-            byte[] data = Files.readAllBytes(
-                pack.getImageFile()
-                    .toPath());
+            byte[] data = sanitizePackForTransfer(pack);
+            if (data == null) {
+                return null;
+            }
             return EmoteServerHandler.sha1(data);
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to checksum pack emoji: {}", pack.name, e);
+            return null;
+        }
+    }
+
+    private static byte[] sanitizePackForTransfer(EmojiFromPack pack) throws IOException {
+        byte[] data = Files.readAllBytes(
+            pack.getImageFile()
+                .toPath());
+        try {
+            return EmojiImageLoader.sanitizeForTransfer(
+                data,
+                pack.getImageFile()
+                    .getName(),
+                true,
+                128)
+                .getBytes();
+        } catch (IOException e) {
+            Minemoticon.LOG.warn("Pack emoji {} is not transferable: {}", pack.name, e.getMessage());
             return null;
         }
     }

@@ -96,6 +96,7 @@ public class EmojiPackLoader {
             var lower = name.toLowerCase();
             return lower.endsWith(".png") || lower.endsWith(".jpg")
                 || lower.endsWith(".jpeg")
+                || lower.endsWith(".gif")
                 || lower.endsWith(".qoi")
                 || lower.endsWith(".webp");
         });
