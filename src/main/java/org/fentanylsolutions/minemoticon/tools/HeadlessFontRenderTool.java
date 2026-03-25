@@ -21,8 +21,8 @@ public final class HeadlessFontRenderTool {
     private static final int GLYPH_SIZE = 128;
     private static final int CELL_SIZE = 152;
     private static final int COLUMNS = 4;
-    private static final int[] DEFAULT_CODEPOINTS = { 0x1F922, 0x1F602, 0x1F924, 0x1F912, 0x1F914, 0x1F62A, 0x1F60A,
-        0x1F48E, 0x1F973, 0x1F915, 0x1F974, 0x1F92E };
+    private static final String[] DEFAULT_SAMPLES = { "1F922", "1F602", "1F924", "1F912", "1F914", "1F62A", "1F60A",
+        "1F48E", "1F973", "1F915", "1F974", "1F92E" };
 
     private HeadlessFontRenderTool() {}
 
@@ -34,7 +34,7 @@ public final class HeadlessFontRenderTool {
 
         Path fontPath = Paths.get(args[0]);
         Path outputDir = Paths.get(args[1]);
-        int[] codepoints = args.length >= 3 ? parseCodepoints(args[2]) : DEFAULT_CODEPOINTS;
+        int[][] samples = args.length >= 3 ? parseSamples(args[2]) : parseSamples(String.join(",", DEFAULT_SAMPLES));
 
         Files.createDirectories(outputDir);
 
@@ -47,12 +47,13 @@ public final class HeadlessFontRenderTool {
             .append(fontPath.toAbsolutePath())
             .append('\n');
 
-        for (int codepoint : codepoints) {
-            BufferedImage image = font.renderGlyph(codepoint, GLYPH_SIZE);
+        for (int[] sample : samples) {
+            BufferedImage image = sample.length == 1 ? font.renderGlyph(sample[0], GLYPH_SIZE)
+                : font.renderGlyphs(sample, GLYPH_SIZE);
             int nonTransparentPixels = countNonTransparentPixels(image);
-            String hex = formatCodepoint(codepoint);
+            String hex = formatSequence(sample);
             Path glyphPath = outputDir.resolve(hex + ".png");
-            String preparedSvg = font.debugPreparedSvg(codepoint);
+            String preparedSvg = sample.length == 1 ? font.debugPreparedSvg(sample[0]) : null;
 
             if (image != null) {
                 ImageIO.write(image, "PNG", glyphPath.toFile());
@@ -72,7 +73,7 @@ public final class HeadlessFontRenderTool {
                 .append(preparedSvg != null)
                 .append(")\n");
 
-            glyphs.add(new RenderedGlyph(codepoint, image, nonTransparentPixels));
+            glyphs.add(new RenderedGlyph(sample, image, nonTransparentPixels));
         }
 
         ImageIO.write(
@@ -115,7 +116,7 @@ public final class HeadlessFontRenderTool {
             }
 
             g.setColor(Color.WHITE);
-            g.drawString(formatCodepoint(glyph.codepoint), cellX + 12, cellY + 144);
+            g.drawString(formatSequence(glyph.codepoints), cellX + 12, cellY + 144);
             g.setColor(glyph.nonTransparentPixels > 0 ? new Color(0x8B, 0xD3, 0x7B) : new Color(0xFF, 0x88, 0x88));
             g.drawString("alpha=" + glyph.nonTransparentPixels, cellX + 76, cellY + 144);
         }
@@ -124,13 +125,18 @@ public final class HeadlessFontRenderTool {
         return sheet;
     }
 
-    private static int[] parseCodepoints(String csv) {
+    private static int[][] parseSamples(String csv) {
         String[] parts = csv.split(",");
-        int[] codepoints = new int[parts.length];
+        int[][] samples = new int[parts.length][];
         for (int i = 0; i < parts.length; i++) {
-            codepoints[i] = Integer.parseInt(parts[i].trim(), 16);
+            String[] seq = parts[i].trim()
+                .split("-");
+            samples[i] = new int[seq.length];
+            for (int j = 0; j < seq.length; j++) {
+                samples[i][j] = Integer.parseInt(seq[j].trim(), 16);
+            }
         }
-        return codepoints;
+        return samples;
     }
 
     private static int countNonTransparentPixels(BufferedImage image) {
@@ -146,8 +152,13 @@ public final class HeadlessFontRenderTool {
         return count;
     }
 
-    private static String formatCodepoint(int codepoint) {
-        return String.format("U+%04X", codepoint);
+    private static String formatSequence(int[] codepoints) {
+        var sb = new StringBuilder();
+        for (int i = 0; i < codepoints.length; i++) {
+            if (i > 0) sb.append('-');
+            sb.append(String.format("U+%04X", codepoints[i]));
+        }
+        return sb.toString();
     }
 
     private static void applyQualityHints(Graphics2D g) {
@@ -161,12 +172,12 @@ public final class HeadlessFontRenderTool {
 
     private static final class RenderedGlyph {
 
-        private final int codepoint;
+        private final int[] codepoints;
         private final BufferedImage image;
         private final int nonTransparentPixels;
 
-        private RenderedGlyph(int codepoint, BufferedImage image, int nonTransparentPixels) {
-            this.codepoint = codepoint;
+        private RenderedGlyph(int[] codepoints, BufferedImage image, int nonTransparentPixels) {
+            this.codepoints = codepoints;
             this.image = image;
             this.nonTransparentPixels = nonTransparentPixels;
         }

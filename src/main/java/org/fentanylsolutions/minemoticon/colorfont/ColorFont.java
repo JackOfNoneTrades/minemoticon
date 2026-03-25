@@ -1,12 +1,16 @@
 package org.fentanylsolutions.minemoticon.colorfont;
 
 import java.awt.Color;
+import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.font.FontRenderContext;
+import java.awt.font.GlyphVector;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.GeneralPath;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -23,13 +27,15 @@ public class ColorFont {
     private final CbdtParser cbdt; // null if no CBDT table
     private final SvgParser svg; // null if no SVG table
     private final org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype; // null if FreeType unavailable
+    private final Font shapingFont; // null if AWT couldn't load the font for GSUB shaping
     private final int unitsPerEm;
     private final int ascent;
     private final int descent;
+    private static final FontRenderContext SHAPING_CONTEXT = new FontRenderContext(new AffineTransform(), true, true);
 
     private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, CbdtParser cbdt,
-        SvgParser svg, org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype, int unitsPerEm, int ascent,
-        int descent) {
+        SvgParser svg, org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype, Font shapingFont,
+        int unitsPerEm, int ascent, int descent) {
         this.cmap = cmap;
         this.colr = colr;
         this.cpal = cpal;
@@ -37,6 +43,7 @@ public class ColorFont {
         this.cbdt = cbdt;
         this.svg = svg;
         this.freetype = freetype;
+        this.shapingFont = shapingFont;
         this.unitsPerEm = unitsPerEm;
         this.ascent = ascent;
         this.descent = descent;
@@ -99,6 +106,12 @@ public class ColorFont {
             svgTable = new SvgParser(reader.getTable("SVG "), head.unitsPerEm, head.ascent, head.descent);
         }
 
+        Font awtShapingFont = null;
+        try {
+            awtShapingFont = Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(reader.getFontData()))
+                .deriveFont((float) head.unitsPerEm);
+        } catch (Exception ignored) {}
+
         return new ColorFont(
             cmapTable,
             colrTable,
@@ -107,6 +120,7 @@ public class ColorFont {
             cbdtTable,
             svgTable,
             ftRenderer,
+            awtShapingFont,
             head.unitsPerEm,
             head.ascent,
             head.descent);
@@ -129,6 +143,9 @@ public class ColorFont {
     // Check if a multi-codepoint sequence can be rendered
     public boolean canRender(int[] codepoints) {
         if (codepoints.length == 1) return hasGlyph(codepoints[0]);
+
+        int shapedGlyphId = findRenderableSequenceGlyphId(codepoints);
+        if (shapedGlyphId != 0) return true;
 
         // Filter to base codepoints
         var base = new java.util.ArrayList<Integer>();
@@ -160,17 +177,8 @@ public class ColorFont {
         int glyphId = cmap.getGlyphId(codepoint);
 
         // Priority: CBDT > SVG > COLR v0 > FreeType (COLRv1) > monochrome glyf
-        if (glyphId != 0 && cbdt != null && cbdt.hasBitmap(glyphId)) {
-            return scaleBitmap(cbdt.getBitmap(glyphId), size);
-        }
-        if (glyphId != 0 && svg != null && svg.hasSvg(glyphId)) {
-            return svg.renderGlyph(glyphId, size);
-        }
-
-        // COLR v0 (our custom renderer)
-        if (glyphId != 0 && colr.hasLayers(glyphId)) {
-            return renderGlyphById(glyphId, size);
-        }
+        BufferedImage direct = renderGlyphByIdAny(glyphId, size);
+        if (direct != null) return direct;
 
         // FreeType fallback for COLRv1 and other formats we can't parse natively
         if (freetype != null) {
@@ -194,6 +202,12 @@ public class ColorFont {
             return renderGlyph(codepoints[0], size);
         }
 
+        int shapedGlyphId = findRenderableSequenceGlyphId(codepoints);
+        if (shapedGlyphId != 0) {
+            BufferedImage shaped = renderGlyphByIdAny(shapedGlyphId, size);
+            if (shaped != null) return shaped;
+        }
+
         // Filter out variation selectors and ZWJ
         var base = new java.util.ArrayList<Integer>();
         for (int cp : codepoints) {
@@ -209,6 +223,70 @@ public class ColorFont {
 
         // Multi-codepoint sequences (flags, ZWJ families, skin tones)
         // need GSUB ligature lookup which we don't support yet
+        return null;
+    }
+
+    private int findRenderableSequenceGlyphId(int[] codepoints) {
+        if (shapingFont == null || codepoints.length == 0) return 0;
+
+        String text = new String(codepoints, 0, codepoints.length);
+        if (text.isEmpty()) return 0;
+
+        GlyphVector glyphVector = shapingFont
+            .layoutGlyphVector(SHAPING_CONTEXT, text.toCharArray(), 0, text.length(), Font.LAYOUT_LEFT_TO_RIGHT);
+
+        int missingGlyph = shapingFont.getMissingGlyphCode();
+        int candidate = 0;
+
+        for (int i = 0; i < glyphVector.getNumGlyphs(); i++) {
+            int glyphId = glyphVector.getGlyphCode(i);
+            if (glyphId == 0 || glyphId == missingGlyph) {
+                continue;
+            }
+
+            double advance = glyphVector.getGlyphPosition(i + 1)
+                .getX()
+                - glyphVector.getGlyphPosition(i)
+                    .getX();
+            boolean renderable = hasRenderableGlyphId(glyphId);
+
+            if (!renderable && Math.abs(advance) < 0.01d) {
+                continue;
+            }
+            if (!renderable) {
+                return 0;
+            }
+            if (candidate != 0 && candidate != glyphId) {
+                return 0;
+            }
+            candidate = glyphId;
+        }
+
+        return candidate;
+    }
+
+    private boolean hasRenderableGlyphId(int glyphId) {
+        if (glyphId == 0) return false;
+        if (cbdt != null && cbdt.hasBitmap(glyphId)) return true;
+        if (svg != null && svg.hasSvg(glyphId)) return true;
+        if (colr.hasLayers(glyphId)) return true;
+        return glyf != null && glyf.hasOutline(glyphId);
+    }
+
+    private BufferedImage renderGlyphByIdAny(int glyphId, int size) {
+        if (glyphId == 0) return null;
+        if (cbdt != null && cbdt.hasBitmap(glyphId)) {
+            return scaleBitmap(cbdt.getBitmap(glyphId), size);
+        }
+        if (svg != null && svg.hasSvg(glyphId)) {
+            return svg.renderGlyph(glyphId, size);
+        }
+        if (colr.hasLayers(glyphId)) {
+            return renderGlyphById(glyphId, size);
+        }
+        if (glyf != null && glyf.hasOutline(glyphId)) {
+            return renderGlyphById(glyphId, size);
+        }
         return null;
     }
 
