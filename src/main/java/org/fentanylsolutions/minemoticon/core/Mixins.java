@@ -15,6 +15,11 @@ public class Mixins extends FentMixins {
             .side(MiscUtil.Side.CLIENT)
             .build();
 
+        registry.mixin("MixinBatchingFontRenderer")
+            .modid("angelica")
+            .phase(MixinUtil.Phase.EARLY)
+            .side(MiscUtil.Side.CLIENT)
+            .build();
         registry.mixin("AccessorGuiTextField")
             .phase(MixinUtil.Phase.EARLY)
             .side(MiscUtil.Side.CLIENT)
