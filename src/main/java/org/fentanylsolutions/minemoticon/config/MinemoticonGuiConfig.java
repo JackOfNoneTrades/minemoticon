@@ -19,6 +19,7 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
     private static final int BTN_OPEN_FOLDER = 9991;
     private static final int BTN_SELECT_FONT = 9992;
     private static final int BTN_OPEN_FONTS = 9993;
+    private static final int BTN_MANAGE_PACKS = 9994;
 
     public MinemoticonGuiConfig(GuiScreen parent) throws ConfigException {
         super(parent, Minemoticon.MODID, Minemoticon.MODID, true, EmojiConfig.class, ServerConfig.class);
@@ -33,11 +34,13 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
         int totalW = this.width - 20;
         int x = 10;
         int gap = 4;
-        int btnW = (totalW - gap * 3) / 4;
+        int btnW = (totalW - gap * 4) / 5;
 
         this.buttonList.add(new GuiButton(BTN_SELECT_FONT, x, btnY, btnW, 20, "\uD83C\uDFA8 Emoji Font"));
         x += btnW + gap;
         this.buttonList.add(new GuiButton(BTN_OPEN_FONTS, x, btnY, btnW, 20, "\uD83D\uDCC2 Fonts Folder"));
+        x += btnW + gap;
+        this.buttonList.add(new GuiButton(BTN_MANAGE_PACKS, x, btnY, btnW, 20, "\u270F Manage Packs"));
         x += btnW + gap;
         this.buttonList.add(new GuiButton(BTN_OPEN_FOLDER, x, btnY, btnW, 20, "\uD83D\uDCC2 Packs Folder"));
         x += btnW + gap;
@@ -56,6 +59,10 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
         }
         if (button.id == BTN_SELECT_FONT) {
             mc.displayGuiScreen(new FontSelectionScreen(this));
+            return;
+        }
+        if (button.id == BTN_MANAGE_PACKS) {
+            mc.displayGuiScreen(new PackManagementScreen(this));
             return;
         }
         if (button.id == BTN_OPEN_FONTS) {
