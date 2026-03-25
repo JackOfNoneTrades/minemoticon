@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.texture.AbstractTexture;
 import net.minecraft.client.resources.IResourceManager;
 import net.minecraft.util.ResourceLocation;
@@ -150,16 +151,14 @@ public class FontSelectionScreen extends GuiScreen {
             float u1 = (float) ((i + 1) * PREVIEW_GLYPH_SIZE) / texW;
             int dx = x + i * (PREVIEW_DISPLAY_SIZE + 1);
 
-            GL11.glBegin(GL11.GL_TRIANGLE_STRIP);
-            GL11.glTexCoord2f(u0, 0);
-            GL11.glVertex3f(dx, y, 0);
-            GL11.glTexCoord2f(u0, 1);
-            GL11.glVertex3f(dx, y + PREVIEW_DISPLAY_SIZE, 0);
-            GL11.glTexCoord2f(u1, 0);
-            GL11.glVertex3f(dx + PREVIEW_DISPLAY_SIZE, y, 0);
-            GL11.glTexCoord2f(u1, 1);
-            GL11.glVertex3f(dx + PREVIEW_DISPLAY_SIZE, y + PREVIEW_DISPLAY_SIZE, 0);
-            GL11.glEnd();
+            Tessellator tessellator = Tessellator.instance;
+
+            tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+            tessellator.addVertexWithUV(dx, y, 0, u0, 0);
+            tessellator.addVertexWithUV(dx, y + PREVIEW_DISPLAY_SIZE, 0, u0, 1);
+            tessellator.addVertexWithUV(dx + PREVIEW_DISPLAY_SIZE, y, 0, u1, 0);
+            tessellator.addVertexWithUV(dx + PREVIEW_DISPLAY_SIZE, y + PREVIEW_DISPLAY_SIZE, 0, u1, 1);
+            tessellator.draw();
         }
     }
 
