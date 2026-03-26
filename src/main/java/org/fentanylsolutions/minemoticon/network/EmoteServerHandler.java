@@ -326,18 +326,19 @@ public class EmoteServerHandler {
     }
 
     private static void processUpload(EntityPlayerMP player, PendingUpload pending) {
+        int maxClientEmoteSize = ServerConfig.getEffectiveMaxClientEmoteSize();
         int totalSize = 0;
         for (byte[] chunk : pending.chunks) {
             if (chunk == null) return;
             totalSize += chunk.length;
         }
 
-        if (totalSize > ServerConfig.maxClientEmoteSize) {
+        if (totalSize > maxClientEmoteSize) {
             restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE.sendTo(
                 new PacketEmoteReject(
                     pending.name,
-                    "Emote too large (" + totalSize + " > " + ServerConfig.maxClientEmoteSize + ")",
+                    "Emote too large (" + totalSize + " > " + maxClientEmoteSize + ")",
                     String.valueOf(pending.pua)),
                 player);
             return;
@@ -358,15 +359,12 @@ public class EmoteServerHandler {
             return;
         }
 
-        if (sanitized.length > ServerConfig.maxClientEmoteSize) {
+        if (sanitized.length > maxClientEmoteSize) {
             restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE.sendTo(
                 new PacketEmoteReject(
                     pending.name,
-                    "Emote too large after sanitizing (" + sanitized.length
-                        + " > "
-                        + ServerConfig.maxClientEmoteSize
-                        + ")",
+                    "Emote too large after sanitizing (" + sanitized.length + " > " + maxClientEmoteSize + ")",
                     String.valueOf(pending.pua)),
                 player);
             return;

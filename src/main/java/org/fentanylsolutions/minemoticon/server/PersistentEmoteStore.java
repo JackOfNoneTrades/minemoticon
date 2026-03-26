@@ -74,8 +74,8 @@ public final class PersistentEmoteStore {
 
         long used = data.getUsedBytes(owner);
         int usedCount = data.getUsedCount(owner);
-        long limit = ServerConfig.maxStoredClientEmojiBytesPerUser;
-        int countLimit = ServerConfig.maxStoredClientEmojiCountPerUser;
+        long limit = ServerConfig.getEffectiveStoredClientEmojiBytesPerUser();
+        int countLimit = ServerConfig.getEffectiveStoredClientEmojiCountPerUser();
         long additional = data.ownerHasChecksum(owner, checksum) ? 0L : sizeBytes;
         int additionalCount = data.ownerHasChecksum(owner, checksum) ? 0 : 1;
 
@@ -116,9 +116,9 @@ public final class PersistentEmoteStore {
         data.markDirty();
         return StoreResult.stored(
             data.getUsedBytes(owner),
-            ServerConfig.maxStoredClientEmojiBytesPerUser,
+            ServerConfig.getEffectiveStoredClientEmojiBytesPerUser(),
             data.getUsedCount(owner),
-            ServerConfig.maxStoredClientEmojiCountPerUser,
+            ServerConfig.getEffectiveStoredClientEmojiCountPerUser(),
             checksum,
             extension);
     }
@@ -144,9 +144,9 @@ public final class PersistentEmoteStore {
         data.markDirty();
         return StoreResult.stored(
             data.getUsedBytes(owner),
-            ServerConfig.maxStoredClientEmojiBytesPerUser,
+            ServerConfig.getEffectiveStoredClientEmojiBytesPerUser(),
             data.getUsedCount(owner),
-            ServerConfig.maxStoredClientEmojiCountPerUser,
+            ServerConfig.getEffectiveStoredClientEmojiCountPerUser(),
             checksum,
             asset.extension);
     }
@@ -165,7 +165,7 @@ public final class PersistentEmoteStore {
     }
 
     public static synchronized long getQuotaBytes() {
-        return ServerConfig.maxStoredClientEmojiBytesPerUser;
+        return ServerConfig.getEffectiveStoredClientEmojiBytesPerUser();
     }
 
     public static synchronized int getUsedCount(String owner) {
@@ -174,7 +174,7 @@ public final class PersistentEmoteStore {
     }
 
     public static synchronized int getQuotaCount() {
-        return ServerConfig.maxStoredClientEmojiCountPerUser;
+        return ServerConfig.getEffectiveStoredClientEmojiCountPerUser();
     }
 
     public static synchronized byte[] readPayload(String checksum) throws IOException {
