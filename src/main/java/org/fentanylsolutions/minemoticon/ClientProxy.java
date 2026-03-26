@@ -1,5 +1,7 @@
 package org.fentanylsolutions.minemoticon;
 
+import net.minecraft.client.Minecraft;
+
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.network.ServerEmojiManagerClient;
 
@@ -24,7 +26,14 @@ public class ClientProxy extends CommonProxy {
     public void onClientConnected(FMLNetworkEvent.ClientConnectedToServerEvent event) {
         Minemoticon.debug("Connected to server, resetting server capabilities");
         ServerCapabilities.reset();
-        EmoteClientHandler.reset();
+        Minecraft.getMinecraft()
+            .func_152344_a(new Runnable() {
+
+                @Override
+                public void run() {
+                    EmoteClientHandler.reset();
+                }
+            });
         ServerEmojiManagerClient.reset();
     }
 
@@ -32,7 +41,15 @@ public class ClientProxy extends CommonProxy {
     public void onClientDisconnected(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
         Minemoticon.debug("Disconnected from server, clearing remote emoji state and cache");
         ServerCapabilities.reset();
-        EmoteClientHandler.resetAndDeleteCache();
+        // Schedule GL-sensitive cleanup on the client thread since disconnect fires on Netty IO thread
+        Minecraft.getMinecraft()
+            .func_152344_a(new Runnable() {
+
+                @Override
+                public void run() {
+                    EmoteClientHandler.resetAndDeleteCache();
+                }
+            });
         ServerEmojiManagerClient.reset();
     }
 
