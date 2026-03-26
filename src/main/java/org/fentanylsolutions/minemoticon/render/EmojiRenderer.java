@@ -22,14 +22,16 @@ public class EmojiRenderer {
     private static final int MAX_PARSE_CACHE_ENTRIES = 512;
     private static final int MAX_CACHED_TEXT_LENGTH = 256;
     private static final ParseCacheEntry NO_MATCH = new ParseCacheEntry(null);
-    private static final Map<String, ParseCacheEntry> PARSE_CACHE =
-        new LinkedHashMap<String, ParseCacheEntry>(MAX_PARSE_CACHE_ENTRIES, 0.75f, true) {
+    private static final Map<String, ParseCacheEntry> PARSE_CACHE = new LinkedHashMap<String, ParseCacheEntry>(
+        MAX_PARSE_CACHE_ENTRIES,
+        0.75f,
+        true) {
 
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, ParseCacheEntry> eldest) {
-                return size() > MAX_PARSE_CACHE_ENTRIES;
-            }
-        };
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, ParseCacheEntry> eldest) {
+            return size() > MAX_PARSE_CACHE_ENTRIES;
+        }
+    };
 
     // When true, parse() returns null unconditionally. Used by the picker
     // info bar to render :colon: text without the font mixin replacing it.
@@ -150,8 +152,8 @@ public class EmojiRenderer {
         if (text == null || sawPua || text.length() > MAX_CACHED_TEXT_LENGTH) {
             return;
         }
-        ParseCacheEntry entry =
-            segments == null ? NO_MATCH : new ParseCacheEntry(Collections.unmodifiableList(new ArrayList<>(segments)));
+        ParseCacheEntry entry = segments == null ? NO_MATCH
+            : new ParseCacheEntry(Collections.unmodifiableList(new ArrayList<>(segments)));
         synchronized (PARSE_CACHE) {
             PARSE_CACHE.put(text, entry);
         }

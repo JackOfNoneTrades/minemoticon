@@ -25,6 +25,17 @@ import javax.imageio.ImageIO;
 // Parses the SVG table from an OpenType font and renders glyphs via JSVG.
 public class SvgParser {
 
+    private static final class SvgDocumentData {
+
+        final String xml;
+        final Map<String, String> elementByIdCache = new HashMap<>();
+        final Map<Integer, String> preparedGlyphCache = new HashMap<>();
+
+        SvgDocumentData(String xml) {
+            this.xml = xml;
+        }
+    }
+
     private static final int MAX_SVG_DOC_SIZE = 32 * 1024 * 1024;
     private static final double OUTPUT_PAD_RATIO = 0.06;
     private static final Pattern SVG_REF_PATTERN = Pattern
@@ -35,7 +46,7 @@ public class SvgParser {
     private static volatile boolean imageMagickChecked;
 
     // Maps glyph ID -> SVG document XML string
-    private final Map<Integer, String> svgDocuments = new HashMap<>();
+    private final Map<Integer, SvgDocumentData> svgDocuments = new HashMap<>();
     private final int emSquare;
     private final int ascent;
     private final int descent;
@@ -71,10 +82,11 @@ public class SvgParser {
                 svg.position(savedPos);
                 String xmlStr = decodeSvgDocument(xmlBytes);
                 if (xmlStr == null || xmlStr.isEmpty()) continue;
+                SvgDocumentData document = new SvgDocumentData(xmlStr);
 
                 // The same SVG doc can cover multiple glyph IDs
                 for (int gid = startGlyphID; gid <= endGlyphID; gid++) {
-                    svgDocuments.put(gid, xmlStr);
+                    svgDocuments.put(gid, document);
                 }
             }
         }
@@ -85,13 +97,14 @@ public class SvgParser {
     }
 
     public String getSvg(int glyphId) {
-        return svgDocuments.get(glyphId);
+        SvgDocumentData document = svgDocuments.get(glyphId);
+        return document != null ? document.xml : null;
     }
 
     public String debugPrepareSvg(int glyphId) {
-        String svgXml = svgDocuments.get(glyphId);
-        if (svgXml == null) return null;
-        return prepareSvg(svgXml, glyphId);
+        SvgDocumentData document = svgDocuments.get(glyphId);
+        if (document == null) return null;
+        return prepareSvg(document, glyphId);
     }
 
     public int getGlyphCount() {
@@ -100,11 +113,11 @@ public class SvgParser {
 
     // Render a glyph's SVG to a BufferedImage using JSVG
     public BufferedImage renderGlyph(int glyphId, int size) {
-        String svgXml = svgDocuments.get(glyphId);
-        if (svgXml == null) return null;
+        SvgDocumentData document = svgDocuments.get(glyphId);
+        if (document == null) return null;
 
         try {
-            String svgToRender = prepareSvg(svgXml, glyphId);
+            String svgToRender = prepareSvg(document, glyphId);
             BufferedImage img = renderGlyphWithJsvg(svgToRender, size);
             if (isUsableImage(img)) {
                 return normalizeRenderedGlyph(img, size);
@@ -120,7 +133,16 @@ public class SvgParser {
         }
     }
 
-    private String prepareSvg(String svgXml, int glyphId) {
+    private String prepareSvg(SvgDocumentData document, int glyphId) {
+        synchronized (document) {
+            String cached = document.preparedGlyphCache.get(glyphId);
+            if (cached != null) {
+                return cached;
+            }
+        }
+
+        String svgXml = document.xml;
+        String prepared;
         // Check if this is a multi-glyph document (like Noto) with <g id="glyphN"> elements
         String glyphTag = "id=\"glyph" + glyphId + "\"";
         if (svgXml.contains(glyphTag)) {
@@ -130,10 +152,10 @@ public class SvgParser {
                 // Noto glyph art often extends past the nominal em square on the right
                 // (tears, hands, confetti, etc), so give the extracted glyph some extra
                 // horizontal room and trim transparent padding after rasterization.
-                String defs = extractReferencedDefs(svgXml, extracted);
+                String defs = extractReferencedDefs(document, extracted);
                 int leftPad = Math.max(32, emSquare / 16);
                 int rightPad = Math.max(128, emSquare / 4);
-                return "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
+                prepared = "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" "
                     + "viewBox=\""
                     + (-leftPad)
                     + " "
@@ -146,6 +168,10 @@ public class SvgParser {
                     + defs
                     + extracted
                     + "</svg>";
+                synchronized (document) {
+                    document.preparedGlyphCache.put(glyphId, prepared);
+                }
+                return prepared;
             }
         }
 
@@ -157,7 +183,11 @@ public class SvgParser {
         if (!result.contains("viewBox")) {
             result = result.replaceFirst("<svg", "<svg viewBox=\"0 0 36 36\"");
         }
-        return result;
+        prepared = result;
+        synchronized (document) {
+            document.preparedGlyphCache.put(glyphId, prepared);
+        }
+        return prepared;
     }
 
     private String extractGlyphGroup(String svgXml, int glyphId) {
@@ -223,7 +253,7 @@ public class SvgParser {
         }
     }
 
-    private String extractReferencedDefs(String svgXml, String svgFragment) {
+    private String extractReferencedDefs(SvgDocumentData document, String svgFragment) {
         Set<String> referencedIds = findReferencedIds(svgFragment);
         if (referencedIds.isEmpty()) {
             return "";
@@ -239,7 +269,7 @@ public class SvgParser {
                 continue;
             }
 
-            String definition = extractElementById(svgXml, id);
+            String definition = extractElementById(document, id);
             if (definition == null) {
                 continue;
             }
@@ -274,17 +304,33 @@ public class SvgParser {
         return ids;
     }
 
-    private String extractElementById(String svgXml, String id) {
+    private String extractElementById(SvgDocumentData document, String id) {
+        synchronized (document) {
+            if (document.elementByIdCache.containsKey(id)) {
+                return document.elementByIdCache.get(id);
+            }
+        }
+
+        String svgXml = document.xml;
         int idPos = svgXml.indexOf("id=\"" + id + "\"");
         if (idPos < 0) {
+            synchronized (document) {
+                document.elementByIdCache.put(id, null);
+            }
             return null;
         }
 
         int start = svgXml.lastIndexOf('<', idPos);
         if (start < 0 || start + 1 >= svgXml.length()) {
+            synchronized (document) {
+                document.elementByIdCache.put(id, null);
+            }
             return null;
         }
         if (svgXml.startsWith("</", start)) {
+            synchronized (document) {
+                document.elementByIdCache.put(id, null);
+            }
             return null;
         }
 
@@ -301,16 +347,26 @@ public class SvgParser {
             nameEnd++;
         }
         if (nameEnd <= nameStart) {
+            synchronized (document) {
+                document.elementByIdCache.put(id, null);
+            }
             return null;
         }
 
         String tagName = svgXml.substring(nameStart, nameEnd);
         int openEnd = svgXml.indexOf('>', nameEnd);
         if (openEnd < 0) {
+            synchronized (document) {
+                document.elementByIdCache.put(id, null);
+            }
             return null;
         }
         if (svgXml.charAt(openEnd - 1) == '/') {
-            return svgXml.substring(start, openEnd + 1);
+            String element = svgXml.substring(start, openEnd + 1);
+            synchronized (document) {
+                document.elementByIdCache.put(id, element);
+            }
+            return element;
         }
 
         int depth = 1;
@@ -319,11 +375,17 @@ public class SvgParser {
             int nextOpen = svgXml.indexOf("<" + tagName, pos);
             int nextClose = svgXml.indexOf("</" + tagName + ">", pos);
             if (nextClose < 0) {
+                synchronized (document) {
+                    document.elementByIdCache.put(id, null);
+                }
                 return null;
             }
             if (nextOpen >= 0 && nextOpen < nextClose) {
                 int nestedOpenEnd = svgXml.indexOf('>', nextOpen);
                 if (nestedOpenEnd < 0) {
+                    synchronized (document) {
+                        document.elementByIdCache.put(id, null);
+                    }
                     return null;
                 }
                 if (svgXml.charAt(nestedOpenEnd - 1) != '/') {
@@ -334,11 +396,18 @@ public class SvgParser {
                 depth--;
                 pos = nextClose + tagName.length() + 3;
                 if (depth == 0) {
-                    return svgXml.substring(start, pos);
+                    String element = svgXml.substring(start, pos);
+                    synchronized (document) {
+                        document.elementByIdCache.put(id, element);
+                    }
+                    return element;
                 }
             }
         }
 
+        synchronized (document) {
+            document.elementByIdCache.put(id, null);
+        }
         return null;
     }
 

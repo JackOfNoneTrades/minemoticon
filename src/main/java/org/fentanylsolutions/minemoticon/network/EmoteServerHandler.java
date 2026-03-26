@@ -117,7 +117,8 @@ public class EmoteServerHandler {
     public static void onPuaRegisterRequest(EntityPlayerMP player, char pua, String name, String namespace,
         String checksum) {
         if (!ServerConfig.allowClientEmotes) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Custom emotes disabled", String.valueOf(pua)), player);
+            NetworkHandler.INSTANCE
+                .sendTo(new PacketEmoteReject(name, "Custom emotes disabled", String.valueOf(pua)), player);
             return;
         }
 
@@ -127,7 +128,8 @@ public class EmoteServerHandler {
         }
 
         if (!isValidName(name) || (namespace != null && !namespace.isEmpty() && !isValidName(namespace))) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Invalid emote name", String.valueOf(pua)), player);
+            NetworkHandler.INSTANCE
+                .sendTo(new PacketEmoteReject(name, "Invalid emote name", String.valueOf(pua)), player);
             return;
         }
 
@@ -146,7 +148,8 @@ public class EmoteServerHandler {
             var claim = PersistentEmoteStore.claimExisting(sender, name, namespace, checksum, pua);
             if (claim == null) {
                 restoreConsumedPua(sender, pua);
-                NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Unknown emote asset", String.valueOf(pua)), player);
+                NetworkHandler.INSTANCE
+                    .sendTo(new PacketEmoteReject(name, "Unknown emote asset", String.valueOf(pua)), player);
                 return;
             }
             if (claim.quotaExceeded) {

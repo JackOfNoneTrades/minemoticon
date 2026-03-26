@@ -129,8 +129,10 @@ public class EmoteClientHandler {
     private static final Set<Character> requestedPuaRegistrations = new HashSet<>();
     private static final Set<Character> requestedPuaResolves = new HashSet<>();
     private static final Set<Character> missingPuas = new HashSet<>();
-    private static final LinkedHashMap<String, CachedTransferPayload> transferPayloadCache =
-        new LinkedHashMap<String, CachedTransferPayload>(MAX_TRANSFER_CACHE_ENTRIES, 0.75f, true);
+    private static final LinkedHashMap<String, CachedTransferPayload> transferPayloadCache = new LinkedHashMap<String, CachedTransferPayload>(
+        MAX_TRANSFER_CACHE_ENTRIES,
+        0.75f,
+        true);
     private static long transferPayloadCacheBytes = 0L;
     private static int suppressedInputDepth = 0;
 
@@ -207,7 +209,8 @@ public class EmoteClientHandler {
             return;
         }
         if (checksum != null && !checksum.isEmpty() && !checksum.equals(transfer.checksum)) {
-            Minemoticon.debug("Upload checksum mismatch for {}: expected {}, got {}", name, checksum, transfer.checksum);
+            Minemoticon
+                .debug("Upload checksum mismatch for {}: expected {}, got {}", name, checksum, transfer.checksum);
             return;
         }
 
@@ -691,8 +694,12 @@ public class EmoteClientHandler {
                 return null;
             }
 
-            CachedTransferPayload created =
-                new CachedTransferPayload(cacheKey, fileSize, lastModified, data, EmoteServerHandler.sha1(data));
+            CachedTransferPayload created = new CachedTransferPayload(
+                cacheKey,
+                fileSize,
+                lastModified,
+                data,
+                EmoteServerHandler.sha1(data));
             cacheTransferPayload(created);
             return created;
         } catch (IOException e) {
@@ -745,8 +752,8 @@ public class EmoteClientHandler {
     private static void trimTransferPayloadCache() {
         Iterator<Map.Entry<String, CachedTransferPayload>> iterator = transferPayloadCache.entrySet()
             .iterator();
-        while ((transferPayloadCache.size() > MAX_TRANSFER_CACHE_ENTRIES || transferPayloadCacheBytes > MAX_TRANSFER_CACHE_BYTES)
-            && iterator.hasNext()) {
+        while ((transferPayloadCache.size() > MAX_TRANSFER_CACHE_ENTRIES
+            || transferPayloadCacheBytes > MAX_TRANSFER_CACHE_BYTES) && iterator.hasNext()) {
             CachedTransferPayload eldest = iterator.next()
                 .getValue();
             transferPayloadCacheBytes -= eldest.data.length;

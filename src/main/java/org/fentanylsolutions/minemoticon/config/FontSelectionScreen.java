@@ -10,6 +10,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -68,6 +70,32 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private static final int PREVIEW_DISPLAY_SIZE = 14;
     private static final int PREVIEW_STRIP_W = PREVIEW_CODEPOINTS.length * (PREVIEW_DISPLAY_SIZE + 1) - 1;
     private static final int PREVIEW_STRIP_H = PREVIEW_DISPLAY_SIZE;
+    private static final int MAX_PREVIEW_CACHE_ENTRIES = 24;
+    private static final long MAX_PREVIEW_CACHE_BYTES = 6L * 1024 * 1024;
+
+    private static final class CachedPreviewStrip {
+
+        final String cacheKey;
+        final long fileSize;
+        final long lastModified;
+        final BufferedImage image;
+        final String unsupportedReason;
+
+        CachedPreviewStrip(String cacheKey, long fileSize, long lastModified, BufferedImage image,
+            String unsupportedReason) {
+            this.cacheKey = cacheKey;
+            this.fileSize = fileSize;
+            this.lastModified = lastModified;
+            this.image = image;
+            this.unsupportedReason = unsupportedReason;
+        }
+    }
+
+    private static final LinkedHashMap<String, CachedPreviewStrip> PREVIEW_STRIP_CACHE = new LinkedHashMap<String, CachedPreviewStrip>(
+        MAX_PREVIEW_CACHE_ENTRIES,
+        0.75F,
+        true);
+    private static long previewStripCacheBytes = 0L;
 
     private final GuiScreen parent;
     private final List<FontEntry> entries = new ArrayList<>();
@@ -700,6 +728,11 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     }
 
     private void loadBundledPreview() {
+        CachedPreviewStrip cached = getCachedPreviewStrip("_bundled", -1L, -1L);
+        if (applyCachedPreview(cached, bundledPreview)) {
+            return;
+        }
+
         DownloadedTexture.submitToPool(() -> {
             boolean permit = false;
             try (var stream = getClass().getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
@@ -707,13 +740,18 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
                 permit = true;
                 if (stream == null) {
                     bundledPreview.setUnsupported("Bundled font missing");
+                    cachePreviewStrip(new CachedPreviewStrip("_bundled", -1L, -1L, null, "Bundled font missing"));
                     return;
                 }
                 byte[] data = readAllBytes(stream);
                 ColorFont font = ColorFont.load(new ByteArrayInputStream(data));
-                renderPreview(font, bundledPreview);
+                BufferedImage strip = buildPreviewStrip(font);
+                bundledPreview.setImage(strip);
+                cachePreviewStrip(new CachedPreviewStrip("_bundled", -1L, -1L, strip, null));
             } catch (Exception e) {
-                bundledPreview.setUnsupported(simplifyLoadError(e));
+                String reason = simplifyLoadError(e);
+                bundledPreview.setUnsupported(reason);
+                cachePreviewStrip(new CachedPreviewStrip("_bundled", -1L, -1L, null, reason));
                 Minemoticon.debug("Failed to render bundled font preview: {}", e.getMessage());
             } finally {
                 if (permit) {
@@ -724,17 +762,30 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     }
 
     private void loadFontPreview(String filename, PreviewTexture preview) {
+        File file = new File(ClientEmojiHandler.FONTS_DIR, filename);
+        String cacheKey = file.getAbsolutePath();
+        long fileSize = file.length();
+        long lastModified = file.lastModified();
+        CachedPreviewStrip cached = getCachedPreviewStrip(cacheKey, fileSize, lastModified);
+        if (applyCachedPreview(cached, preview)) {
+            return;
+        }
+
         DownloadedTexture.submitToPool(() -> {
             boolean permit = false;
             try {
                 PREVIEW_LOAD_SEMAPHORE.acquire();
                 permit = true;
-                byte[] data = Files.readAllBytes(new File(ClientEmojiHandler.FONTS_DIR, filename).toPath());
+                byte[] data = Files.readAllBytes(file.toPath());
                 ColorFont font = ColorFont.load(new ByteArrayInputStream(data));
-                renderPreview(font, preview);
+                BufferedImage strip = buildPreviewStrip(font);
+                preview.setImage(strip);
+                cachePreviewStrip(new CachedPreviewStrip(cacheKey, fileSize, lastModified, strip, null));
             } catch (Exception e) {
                 Minemoticon.LOG.warn("Font {} failed to load: {}", filename, e.getMessage());
-                preview.setUnsupported(simplifyLoadError(e));
+                String reason = simplifyLoadError(e);
+                preview.setUnsupported(reason);
+                cachePreviewStrip(new CachedPreviewStrip(cacheKey, fileSize, lastModified, null, reason));
             } finally {
                 if (permit) {
                     PREVIEW_LOAD_SEMAPHORE.release();
@@ -758,7 +809,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         }
     }
 
-    private void renderPreview(ColorFont font, PreviewTexture preview) {
+    private BufferedImage buildPreviewStrip(ColorFont font) {
         int count = PREVIEW_CODEPOINTS.length;
         BufferedImage strip = new BufferedImage(
             count * PREVIEW_GLYPH_SIZE,
@@ -773,7 +824,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             }
         }
         g.dispose();
-        preview.setImage(strip);
+        return strip;
     }
 
     private void renderPreviewStrip(PreviewTexture preview, int x, int y) {
@@ -807,6 +858,64 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             baos.write(buf, 0, n);
         }
         return baos.toByteArray();
+    }
+
+    private static synchronized CachedPreviewStrip getCachedPreviewStrip(String cacheKey, long fileSize,
+        long lastModified) {
+        CachedPreviewStrip cached = PREVIEW_STRIP_CACHE.get(cacheKey);
+        if (cached == null) {
+            return null;
+        }
+        if (cached.fileSize == fileSize && cached.lastModified == lastModified) {
+            return cached;
+        }
+        removePreviewStripCacheEntry(cacheKey, cached);
+        return null;
+    }
+
+    private static boolean applyCachedPreview(CachedPreviewStrip cached, PreviewTexture preview) {
+        if (cached == null) {
+            return false;
+        }
+        if (cached.image != null) {
+            preview.setImage(cached.image);
+        } else {
+            preview.setUnsupported(cached.unsupportedReason);
+        }
+        return true;
+    }
+
+    private static synchronized void cachePreviewStrip(CachedPreviewStrip entry) {
+        CachedPreviewStrip previous = PREVIEW_STRIP_CACHE.put(entry.cacheKey, entry);
+        if (previous != null) {
+            previewStripCacheBytes -= estimatePreviewStripBytes(previous);
+        }
+        previewStripCacheBytes += estimatePreviewStripBytes(entry);
+        trimPreviewStripCache();
+    }
+
+    private static void trimPreviewStripCache() {
+        Iterator<Map.Entry<String, CachedPreviewStrip>> iterator = PREVIEW_STRIP_CACHE.entrySet()
+            .iterator();
+        while ((PREVIEW_STRIP_CACHE.size() > MAX_PREVIEW_CACHE_ENTRIES
+            || previewStripCacheBytes > MAX_PREVIEW_CACHE_BYTES) && iterator.hasNext()) {
+            CachedPreviewStrip eldest = iterator.next()
+                .getValue();
+            previewStripCacheBytes -= estimatePreviewStripBytes(eldest);
+            iterator.remove();
+        }
+    }
+
+    private static void removePreviewStripCacheEntry(String cacheKey, CachedPreviewStrip cached) {
+        PREVIEW_STRIP_CACHE.remove(cacheKey);
+        previewStripCacheBytes -= estimatePreviewStripBytes(cached);
+    }
+
+    private static long estimatePreviewStripBytes(CachedPreviewStrip entry) {
+        if (entry == null || entry.image == null) {
+            return 0L;
+        }
+        return (long) entry.image.getWidth() * (long) entry.image.getHeight() * 4L;
     }
 
     private String validateFontFile(File source) {
