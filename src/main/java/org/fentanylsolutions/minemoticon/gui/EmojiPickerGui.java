@@ -15,6 +15,7 @@ import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.lwjgl.input.Mouse;
 import org.lwjgl.opengl.GL11;
@@ -515,7 +516,7 @@ public class EmojiPickerGui {
 
                 int col = (mouseX - xStart) / CELL;
                 if (col >= 0 && col < COLS && emojis[col] != null) {
-                    String text = emojis[col].getInsertText();
+                    String text = EmoteClientHandler.getInsertTextForEmoji(emojis[col]);
                     if (EmojiConfig.closePickerOnSelect) toggle();
                     return text;
                 }
@@ -558,7 +559,14 @@ public class EmojiPickerGui {
                 return false; // no selection -- let Enter send the chat message
         }
 
-        if (searchField.textboxKeyTyped(c, keyCode)) {
+        EmoteClientHandler.beginInputSuppression();
+        boolean handled;
+        try {
+            handled = searchField.textboxKeyTyped(c, keyCode);
+        } finally {
+            EmoteClientHandler.endInputSuppression();
+        }
+        if (handled) {
             updateFilter();
             scrollOffset = 0;
             scrollSmooth = 0;
@@ -601,7 +609,7 @@ public class EmojiPickerGui {
         if (selectedLine < 0 || selectedLine >= lines.size()) return false;
         if (!(lines.get(selectedLine) instanceof Emoji[]emojis)) return false;
         if (selectedCol < 0 || selectedCol >= COLS || emojis[selectedCol] == null) return false;
-        pendingInsertText = emojis[selectedCol].getInsertText();
+        pendingInsertText = EmoteClientHandler.getInsertTextForEmoji(emojis[selectedCol]);
         if (EmojiConfig.closePickerOnSelect) toggle();
         return true;
     }

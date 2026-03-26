@@ -13,6 +13,7 @@ import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.PlayerEvent;
+import cpw.mods.fml.common.gameevent.TickEvent;
 
 public class CommonProxy {
 
@@ -31,6 +32,9 @@ public class CommonProxy {
 
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandReloadEmojis());
+        event.registerServerCommand(new CommandClearEmojis());
+        event.registerServerCommand(new CommandSendOneOff());
+        EmoteServerHandler.bootstrapPersistentStore();
         EmoteServerHandler.loadServerPacks();
     }
 
@@ -40,6 +44,7 @@ public class CommonProxy {
             Minemoticon.debug("Sending presence packet to {}", player.getCommandSenderName());
             NetworkHandler.INSTANCE.sendTo(new PacketServerPresence(), player);
             EmoteServerHandler.sendServerPacksToPlayer(player);
+            EmoteServerHandler.sendPuaLeasesToPlayer(player);
         }
     }
 
@@ -47,6 +52,13 @@ public class CommonProxy {
     public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.player instanceof EntityPlayerMP player) {
             EmoteServerHandler.onPlayerDisconnect(player);
+        }
+    }
+
+    @SubscribeEvent
+    public void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            EmoteServerHandler.tick();
         }
     }
 }

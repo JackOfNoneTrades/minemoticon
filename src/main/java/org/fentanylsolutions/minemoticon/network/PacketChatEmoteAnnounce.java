@@ -10,24 +10,28 @@ import io.netty.buffer.ByteBuf;
 public class PacketChatEmoteAnnounce implements IMessage {
 
     public String name;
+    public String namespace;
     public String checksum;
 
     public PacketChatEmoteAnnounce() {}
 
-    public PacketChatEmoteAnnounce(String name, String checksum) {
+    public PacketChatEmoteAnnounce(String name, String namespace, String checksum) {
         this.name = name;
+        this.namespace = namespace;
         this.checksum = checksum;
     }
 
     @Override
     public void fromBytes(ByteBuf buf) {
         name = ByteBufUtils.readUTF8String(buf);
+        namespace = ByteBufUtils.readUTF8String(buf);
         checksum = ByteBufUtils.readUTF8String(buf);
     }
 
     @Override
     public void toBytes(ByteBuf buf) {
         ByteBufUtils.writeUTF8String(buf, name);
+        ByteBufUtils.writeUTF8String(buf, namespace);
         ByteBufUtils.writeUTF8String(buf, checksum);
     }
 
@@ -35,7 +39,6 @@ public class PacketChatEmoteAnnounce implements IMessage {
 
         @Override
         public IMessage onMessage(PacketChatEmoteAnnounce message, MessageContext ctx) {
-            EmoteServerHandler.onEmoteAnnounce(ctx.getServerHandler().playerEntity, message.name, message.checksum);
             return null;
         }
     }

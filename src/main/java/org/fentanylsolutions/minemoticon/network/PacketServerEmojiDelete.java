@@ -6,14 +6,13 @@ import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
 import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import io.netty.buffer.ByteBuf;
 
-// Client -> Server: "I need the image for :name:"
-public class PacketEmoteDownloadRequest implements IMessage {
+public class PacketServerEmojiDelete implements IMessage {
 
     public String checksum;
 
-    public PacketEmoteDownloadRequest() {}
+    public PacketServerEmojiDelete() {}
 
-    public PacketEmoteDownloadRequest(String checksum) {
+    public PacketServerEmojiDelete(String checksum) {
         this.checksum = checksum;
     }
 
@@ -27,11 +26,15 @@ public class PacketEmoteDownloadRequest implements IMessage {
         ByteBufUtils.writeUTF8String(buf, checksum);
     }
 
-    public static class Handler implements IMessageHandler<PacketEmoteDownloadRequest, IMessage> {
+    public static class Handler implements IMessageHandler<PacketServerEmojiDelete, IMessage> {
 
         @Override
-        public IMessage onMessage(PacketEmoteDownloadRequest message, MessageContext ctx) {
-            EmoteServerHandler.onDownloadRequest(ctx.getServerHandler().playerEntity, message.checksum);
+        public IMessage onMessage(PacketServerEmojiDelete message, MessageContext ctx) {
+            boolean removed = EmoteServerHandler
+                .deleteStoredEmojiForPlayer(ctx.getServerHandler().playerEntity, message.checksum);
+            EmoteServerHandler.sendStoredEmojiListToPlayer(
+                ctx.getServerHandler().playerEntity,
+                removed ? "Deleted emoji" : "Emoji not found");
             return null;
         }
     }

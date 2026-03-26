@@ -3,9 +3,13 @@ package org.fentanylsolutions.minemoticon.network;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.Arrays;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
@@ -15,61 +19,156 @@ import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromRemote;
 import org.fentanylsolutions.minemoticon.image.EmojiImageLoader;
+import org.fentanylsolutions.minemoticon.text.EmojiPua;
 
 public class EmoteClientHandler {
 
+    public static final class TextReplacement {
+
+        public final String text;
+        public final int cursorPosition;
+
+        public TextReplacement(String text, int cursorPosition) {
+            this.text = text;
+            this.cursorPosition = cursorPosition;
+        }
+    }
+
     private static final int CHUNK_SIZE = 30000;
     private static final File CACHE_DIR = new File("config/minemoticon/emote_cache");
+    private static final int MAX_ACTIVE_DOWNLOADS = 2;
+    private static final long DOWNLOAD_TIMEOUT_MS = 15000L;
 
     private static class PendingDownload {
 
-        final String name;
+        final String checksum;
         final int totalChunks;
         final byte[][] chunks;
         int received;
 
-        PendingDownload(String name, int totalChunks) {
-            this.name = name;
+        PendingDownload(String checksum, int totalChunks) {
+            this.checksum = checksum;
             this.totalChunks = totalChunks;
             this.chunks = new byte[totalChunks][];
         }
     }
 
-    private static final Map<String, PendingDownload> pendingDownloads = new HashMap<>();
-    private static final Map<String, Boolean> pendingUsable = new HashMap<>();
-    private static final Map<String, String> pendingCategories = new HashMap<>();
-    private static final Map<String, Boolean> pendingIsIcon = new HashMap<>();
-    private static final Map<String, String> pendingNamespaces = new HashMap<>();
+    private static class PendingAlias {
 
-    // Called when the client is about to send a chat message containing pack emojis
-    public static void announceEmotesInMessage(String message) {
-        if (!ServerCapabilities.hasServerMod()) return;
+        final String name;
+        final String category;
+        final String namespace;
+        final String pua;
+        final boolean usable;
+        final boolean isIcon;
 
-        int count = 0;
-        for (int i = 0; i < message.length() && count < 5; i++) {
-            if (message.charAt(i) != ':') continue;
-            int end = message.indexOf(':', i + 1);
-            if (end == -1) continue;
-
-            String key = message.substring(i, end + 1);
-            Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
-            if (emoji instanceof EmojiFromPack pack) {
-                String checksum = checksumForPack(pack);
-                if (checksum != null) {
-                    NetworkHandler.INSTANCE.sendToServer(new PacketChatEmoteAnnounce(pack.name, checksum));
-                    count++;
-                    Minemoticon.debug("Announcing emote {} (checksum {})", pack.name, checksum);
-                }
-            }
-            i = end;
+        PendingAlias(String name, String category, String namespace, String pua, boolean usable, boolean isIcon) {
+            this.name = name;
+            this.category = category;
+            this.namespace = namespace != null ? namespace : "";
+            this.pua = pua != null ? pua : "";
+            this.usable = usable;
+            this.isIcon = isIcon;
         }
     }
 
-    // Server wants us to upload an emote
-    public static void onUploadRequest(String name) {
-        Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + name + ":");
-        if (!(emoji instanceof EmojiFromPack pack)) {
-            Minemoticon.debug("Upload requested for unknown pack emoji: {}", name);
+    private static class PendingLocalPua {
+
+        final char pua;
+        final String name;
+        final String namespace;
+        final String checksum;
+        final EmojiFromPack pack;
+
+        PendingLocalPua(char pua, String name, String namespace, String checksum, EmojiFromPack pack) {
+            this.pua = pua;
+            this.name = name;
+            this.namespace = namespace != null ? namespace : "";
+            this.checksum = checksum;
+            this.pack = pack;
+        }
+    }
+
+    private static final Map<String, PendingDownload> pendingDownloads = new HashMap<>();
+    private static final Map<String, List<PendingAlias>> pendingAliases = new HashMap<>();
+    private static final Set<String> requestedDownloads = new HashSet<>();
+    private static final ArrayDeque<String> queuedDownloads = new ArrayDeque<>();
+    private static final Map<String, Long> activeDownloads = new HashMap<>();
+
+    private static final Map<Character, PendingLocalPua> pendingLocalPuas = new HashMap<>();
+    private static final Map<String, Character> sessionPuasByChecksum = new HashMap<>();
+    private static final Map<String, Character> sessionPuasByPackKey = new HashMap<>();
+    private static final ArrayDeque<Character> availablePuas = new ArrayDeque<>();
+    private static final Set<Character> leasedPuas = new HashSet<>();
+    private static final Set<Character> requestedPuaRegistrations = new HashSet<>();
+    private static final Set<Character> requestedPuaResolves = new HashSet<>();
+    private static final Set<Character> missingPuas = new HashSet<>();
+    private static int suppressedInputDepth = 0;
+
+    public static void beginInputSuppression() {
+        suppressedInputDepth++;
+    }
+
+    public static void endInputSuppression() {
+        if (suppressedInputDepth > 0) {
+            suppressedInputDepth--;
+        }
+    }
+
+    public static String getInsertTextForEmoji(Emoji emoji) {
+        if (emoji == null) {
+            return "";
+        }
+        if (emoji instanceof EmojiFromRemote remote && !remote.isUsable()) {
+            return emoji.getShorterString();
+        }
+        if (emoji instanceof EmojiFromPack pack) {
+            return getInsertTextForPack(pack);
+        }
+        return emoji.getInsertText();
+    }
+
+    public static TextReplacement substituteCompletedAlias(String text, int cursorPosition) {
+        if (suppressedInputDepth > 0 || text == null || text.isEmpty() || cursorPosition <= 0) {
+            return null;
+        }
+
+        int tokenEnd = cursorPosition;
+        while (tokenEnd > 0 && Character.isWhitespace(text.charAt(tokenEnd - 1))) {
+            tokenEnd--;
+        }
+        if (tokenEnd <= 0 || text.charAt(tokenEnd - 1) != ':') {
+            return null;
+        }
+
+        int tokenStart = tokenEnd - 2;
+        while (tokenStart >= 0 && !Character.isWhitespace(text.charAt(tokenStart))) {
+            if (text.charAt(tokenStart) == ':') {
+                break;
+            }
+            tokenStart--;
+        }
+        if (tokenStart < 0 || text.charAt(tokenStart) != ':' || tokenStart >= tokenEnd - 1) {
+            return null;
+        }
+
+        String token = text.substring(tokenStart, tokenEnd);
+        String replacement = replacementForToken(token);
+        if (replacement == null || replacement.equals(token)) {
+            return null;
+        }
+
+        int trailingOffset = cursorPosition - tokenEnd;
+        String replaced = text.substring(0, tokenStart) + replacement + text.substring(tokenEnd);
+        int newCursor = tokenStart + replacement.length() + trailingOffset;
+        return new TextReplacement(replaced, Math.max(0, Math.min(newCursor, replaced.length())));
+    }
+
+    public static void onUploadRequest(String name, String namespace, String checksum, String pua) {
+        PendingLocalPua pendingLocal = pua != null && pua.length() == 1 ? pendingLocalPuas.get(pua.charAt(0)) : null;
+        EmojiFromPack pack = pendingLocal != null ? pendingLocal.pack : findPackEmoji(name, namespace);
+        if (pack == null) {
+            Minemoticon.debug("Upload requested for unknown pack emoji: {} ({})", name, namespace);
             return;
         }
 
@@ -79,127 +178,241 @@ public class EmoteClientHandler {
                 Minemoticon.debug("Pack emoji {} could not be sanitized for upload", name);
                 return;
             }
-            int totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            String actualChecksum = EmoteServerHandler.sha1(data);
+            if (checksum != null && !checksum.isEmpty() && !checksum.equals(actualChecksum)) {
+                Minemoticon
+                    .debug("Upload checksum mismatch for {}: expected {}, got {}", name, checksum, actualChecksum);
+                return;
+            }
 
+            int totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
             for (int i = 0; i < totalChunks; i++) {
                 int start = i * CHUNK_SIZE;
                 int end = Math.min(start + CHUNK_SIZE, data.length);
-                byte[] chunk = Arrays.copyOfRange(data, start, end);
-                NetworkHandler.INSTANCE.sendToServer(new PacketEmoteDataUpload(name, i, totalChunks, chunk));
+                byte[] chunk = java.util.Arrays.copyOfRange(data, start, end);
+                NetworkHandler.INSTANCE.sendToServer(
+                    new PacketEmoteDataUpload(name, pack.getPackFolder(), actualChecksum, pua, i, totalChunks, chunk));
             }
 
-            Minemoticon.debug("Uploading emote {} ({} bytes, {} chunks)", name, data.length, totalChunks);
+            Minemoticon.debug(
+                "Uploading emote {} from {} ({} bytes, {} chunks, pua={})",
+                name,
+                pack.getPackFolder(),
+                data.length,
+                totalChunks,
+                pua);
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to read pack emoji file for upload: {}", name, e);
         }
     }
 
-    // Server is telling us an emote is available
     public static void onEmoteBroadcast(String name, String checksum, String senderName, byte type, String category,
-        String namespace, boolean isIcon) {
-        if (type == PacketEmoteBroadcast.TYPE_CLIENT_EMOTE && !EmojiConfig.receiveClientEmotes) return;
+        String namespace, String pua, boolean isIcon) {
+        if (type == PacketEmoteBroadcast.TYPE_CLIENT_EMOTE && !EmojiConfig.receiveClientEmotes) {
+            return;
+        }
 
         boolean usable = type == PacketEmoteBroadcast.TYPE_SERVER_PACK;
         String effectiveCategory = (category != null && !category.isEmpty()) ? category
             : (usable ? "Server" : "Remote");
         Minemoticon.debug(
-            "Emote broadcast: {} from {} (checksum {}, type {}, category {})",
+            "Emote broadcast: {} from {} (checksum {}, type {}, category {}, pua={})",
             name,
             senderName,
             checksum,
             type,
-            effectiveCategory);
+            effectiveCategory,
+            pua);
 
-        // Store for when download completes
-        pendingUsable.put(name, usable);
-        pendingCategories.put(name, effectiveCategory);
-        pendingIsIcon.put(name, isIcon);
-        pendingNamespaces.put(name, namespace != null ? namespace : "");
+        if (pua != null && pua.length() == 1) {
+            char puaChar = pua.charAt(0);
+            requestedPuaResolves.remove(puaChar);
+            missingPuas.remove(puaChar);
+            requestedPuaRegistrations.remove(puaChar);
+            PendingLocalPua pendingLocal = pendingLocalPuas.remove(puaChar);
+            if (pendingLocal != null && checksum != null && !checksum.isEmpty()) {
+                sessionPuasByChecksum.put(checksum, puaChar);
+                sessionPuasByPackKey.put(":" + pendingLocal.namespace + "/" + pendingLocal.name + ":", puaChar);
+                return;
+            }
+        }
 
-        // Already registered with same checksum?
-        Emoji existing = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + name + ":");
-        if (existing instanceof EmojiFromRemote remote && remote.getChecksum()
-            .equals(checksum)) {
+        if (usable && isAliasRegistered(name, namespace, checksum)) {
             return;
         }
 
-        // Check disk cache
-        File cached = EmojiImageLoader.findCachedFile(CACHE_DIR, checksum);
+        File cached = findCachedEmoteFile(checksum);
         if (cached != null && cached.isFile()) {
-            registerRemoteEmoji(name, checksum, cached, effectiveCategory, namespace, usable, isIcon);
+            registerRemoteEmoji(name, checksum, cached, effectiveCategory, namespace, pua, usable, isIcon);
             return;
         }
 
-        // Request download
-        NetworkHandler.INSTANCE.sendToServer(new PacketEmoteDownloadRequest(name));
+        List<PendingAlias> aliases = pendingAliases.computeIfAbsent(checksum, ignored -> new ArrayList<>());
+        boolean knownAlias = aliases.stream()
+            .anyMatch(alias -> alias.name.equals(name) && alias.namespace.equals(namespace != null ? namespace : ""));
+        if (!knownAlias) {
+            aliases.add(new PendingAlias(name, effectiveCategory, namespace, pua, usable, isIcon));
+        }
+
+        queueDownloadRequest(checksum);
     }
 
-    // Receiving chunked image data from server
-    public static void onEmoteDataDownload(String name, int chunkIndex, int totalChunks, byte[] data) {
-        var pending = pendingDownloads.computeIfAbsent(name, k -> new PendingDownload(name, totalChunks));
+    public static void onPuaLeaseGrant(String puas) {
+        if (puas == null || puas.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < puas.length(); i++) {
+            char pua = puas.charAt(i);
+            if (!EmojiPua.isPua(pua) || leasedPuas.contains(pua) || availablePuas.contains(pua)) {
+                continue;
+            }
+            leasedPuas.add(pua);
+            availablePuas.addLast(pua);
+        }
+    }
 
-        if (chunkIndex < 0 || chunkIndex >= pending.totalChunks) return;
-        if (pending.chunks[chunkIndex] != null) return;
+    public static void onPuaResolveResponse(String pua, boolean found, String name, String checksum, String senderName,
+        String namespace) {
+        if (pua == null || pua.length() != 1 || !EmojiPua.isPua(pua.charAt(0))) {
+            return;
+        }
+
+        char puaChar = pua.charAt(0);
+        requestedPuaResolves.remove(puaChar);
+        if (!found) {
+            missingPuas.add(puaChar);
+            return;
+        }
+
+        missingPuas.remove(puaChar);
+        onEmoteBroadcast(name, checksum, senderName, PacketEmoteBroadcast.TYPE_CLIENT_EMOTE, "", namespace, pua, false);
+    }
+
+    public static void onPuaObserved(char pua) {
+        if (!ServerCapabilities.hasServerMod() || !EmojiPua.isPua(pua)) {
+            return;
+        }
+
+        PendingLocalPua pendingLocal = pendingLocalPuas.get(pua);
+        if (pendingLocal != null) {
+            if (requestedPuaRegistrations.add(pua)) {
+                NetworkHandler.INSTANCE.sendToServer(
+                    new PacketPuaRegisterRequest(
+                        String.valueOf(pua),
+                        pendingLocal.name,
+                        pendingLocal.namespace,
+                        pendingLocal.checksum));
+            }
+            return;
+        }
+
+        if (ClientEmojiHandler.EMOJI_PUA_LOOKUP.containsKey(pua) || missingPuas.contains(pua)) {
+            return;
+        }
+
+        if (requestedPuaResolves.add(pua)) {
+            NetworkHandler.INSTANCE.sendToServer(new PacketPuaResolveRequest(String.valueOf(pua)));
+        }
+    }
+
+    public static void onEmoteDataDownload(String checksum, int chunkIndex, int totalChunks, byte[] data) {
+        PendingDownload pending = pendingDownloads
+            .computeIfAbsent(checksum, ignored -> new PendingDownload(checksum, totalChunks));
+        if (chunkIndex < 0 || chunkIndex >= pending.totalChunks || pending.chunks[chunkIndex] != null) {
+            return;
+        }
 
         pending.chunks[chunkIndex] = data;
         pending.received++;
 
         if (pending.received >= pending.totalChunks) {
-            pendingDownloads.remove(name);
+            pendingDownloads.remove(checksum);
             processDownload(pending);
         }
     }
 
     public static void reset() {
         pendingDownloads.clear();
-        pendingUsable.clear();
-        pendingCategories.clear();
-        pendingIsIcon.clear();
-        pendingNamespaces.clear();
-        clearRemoteEmojis();
-        clearEmoteDiskCache();
+        pendingAliases.clear();
+        requestedDownloads.clear();
+        queuedDownloads.clear();
+        activeDownloads.clear();
+        pendingLocalPuas.clear();
+        sessionPuasByChecksum.clear();
+        sessionPuasByPackKey.clear();
+        availablePuas.clear();
+        leasedPuas.clear();
+        requestedPuaRegistrations.clear();
+        requestedPuaResolves.clear();
+        missingPuas.clear();
+        clearRemoteEmojis(true);
+        ClientEmojiHandler.EMOJI_PUA_LOOKUP.clear();
     }
 
-    private static void clearEmoteDiskCache() {
-        if (!CACHE_DIR.isDirectory()) return;
-        File[] files = CACHE_DIR.listFiles();
-        if (files == null) return;
-        int count = 0;
-        for (File f : files) {
-            if (f.isFile() && f.delete()) count++;
+    public static void tick() {
+        long now = System.currentTimeMillis();
+        List<String> timedOut = new ArrayList<>();
+        for (Map.Entry<String, Long> entry : activeDownloads.entrySet()) {
+            if (now - entry.getValue() > DOWNLOAD_TIMEOUT_MS) {
+                timedOut.add(entry.getKey());
+            }
         }
-        if (count > 0) {
-            Minemoticon.debug("Cleared {} emote cache files", count);
+
+        for (String checksum : timedOut) {
+            activeDownloads.remove(checksum);
+            requestedDownloads.remove(checksum);
+            pendingDownloads.remove(checksum);
+            pendingAliases.remove(checksum);
+            Minemoticon.debug("Timed out remote emote download for {}", checksum);
         }
+
+        pumpQueuedDownloads();
     }
 
     public static void clearRemoteEmojis() {
-        for (var emoji : new java.util.ArrayList<>(ClientEmojiHandler.EMOJI_LOOKUP.values())) {
-            if (emoji instanceof EmojiFromRemote remote) {
+        clearRemoteEmojis(false);
+    }
+
+    private static void clearRemoteEmojis(boolean includeUsable) {
+        for (Emoji emoji : new ArrayList<>(ClientEmojiHandler.EMOJI_LOOKUP.values())) {
+            if (emoji instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable())) {
                 remote.destroy();
             }
         }
         ClientEmojiHandler.EMOJI_LOOKUP.values()
-            .removeIf(e -> e instanceof EmojiFromRemote);
-        ClientEmojiHandler.EMOJI_LIST.removeIf(e -> e instanceof EmojiFromRemote);
+            .removeIf(e -> e instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable()));
+        ClientEmojiHandler.EMOJI_LIST
+            .removeIf(e -> e instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable()));
         ClientEmojiHandler.EMOJI_MAP.values()
-            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromRemote));
+            .forEach(
+                list -> list
+                    .removeIf(e -> e instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable())));
         ClientEmojiHandler.EMOJI_MAP.values()
-            .removeIf(java.util.List::isEmpty);
-        ClientEmojiHandler.PACK_CATEGORY_ICONS.values()
-            .removeIf(e -> e instanceof EmojiFromRemote);
+            .removeIf(List::isEmpty);
+        ClientEmojiHandler.PACK_CATEGORY_ICONS.entrySet()
+            .removeIf(
+                entry -> entry.getValue() instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable()));
         ClientEmojiHandler.EMOJI_BY_SHORT_NAME.values()
-            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromRemote));
+            .forEach(
+                list -> list
+                    .removeIf(e -> e instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable())));
         ClientEmojiHandler.EMOJI_BY_SHORT_NAME.values()
-            .removeIf(java.util.List::isEmpty);
+            .removeIf(List::isEmpty);
+        ClientEmojiHandler.EMOJI_PUA_LOOKUP.entrySet()
+            .removeIf(
+                entry -> entry.getValue() instanceof EmojiFromRemote remote && (includeUsable || !remote.isUsable()));
+        requestedPuaResolves.clear();
+        missingPuas.clear();
         ClientEmojiHandler.buildPickerData();
-        Minemoticon.debug("Cleared remote emojis");
+        Minemoticon.debug("Cleared {} remote emojis", includeUsable ? "all" : "client");
     }
 
     private static void processDownload(PendingDownload pending) {
         int totalSize = 0;
         for (byte[] chunk : pending.chunks) {
-            if (chunk == null) return;
+            if (chunk == null) {
+                return;
+            }
             totalSize += chunk.length;
         }
 
@@ -211,45 +424,90 @@ public class EmoteClientHandler {
         }
 
         String checksum = EmoteServerHandler.sha1(raw);
-
-        // Save to cache
         CACHE_DIR.mkdirs();
         try {
             String extension = EmojiImageLoader.fileExtensionForPayload(raw);
             File cacheFile = new File(CACHE_DIR, checksum + extension);
             Files.write(cacheFile.toPath(), raw);
-            boolean usable = pendingUsable.getOrDefault(pending.name, false);
-            String cat = pendingCategories.getOrDefault(pending.name, "Remote");
-            boolean isIcon = pendingIsIcon.getOrDefault(pending.name, false);
-            String ns = pendingNamespaces.getOrDefault(pending.name, "");
-            pendingUsable.remove(pending.name);
-            pendingCategories.remove(pending.name);
-            pendingIsIcon.remove(pending.name);
-            pendingNamespaces.remove(pending.name);
-            Minemoticon.debug(
-                "Cached remote emote {} ({} bytes, category={}, usable={})",
-                pending.name,
-                raw.length,
-                cat,
-                usable);
-            registerRemoteEmoji(pending.name, checksum, cacheFile, cat, ns, usable, isIcon);
+            activeDownloads.remove(pending.checksum);
+            requestedDownloads.remove(pending.checksum);
+            List<PendingAlias> aliases = pendingAliases.remove(pending.checksum);
+            if (aliases != null) {
+                for (PendingAlias alias : aliases) {
+                    registerRemoteEmoji(
+                        alias.name,
+                        checksum,
+                        cacheFile,
+                        alias.category,
+                        alias.namespace,
+                        alias.pua,
+                        alias.usable,
+                        alias.isIcon);
+                }
+            }
         } catch (IOException e) {
-            Minemoticon.LOG.error("Failed to cache remote emote: {}", pending.name, e);
+            activeDownloads.remove(pending.checksum);
+            requestedDownloads.remove(pending.checksum);
+            Minemoticon.LOG.error("Failed to cache remote emote: {}", pending.checksum, e);
+        } finally {
+            pumpQueuedDownloads();
+        }
+    }
+
+    public static File findCachedEmoteFile(String checksum) {
+        return EmojiImageLoader.findCachedFile(CACHE_DIR, checksum);
+    }
+
+    public static void queueDownloadRequest(String checksum) {
+        if (checksum == null || checksum.isEmpty() || !requestedDownloads.add(checksum)) {
+            return;
+        }
+
+        queuedDownloads.addLast(checksum);
+        pumpQueuedDownloads();
+    }
+
+    private static boolean isAliasRegistered(String name, String namespace, String checksum) {
+        String key = namespace != null && !namespace.isEmpty() ? ":" + namespace + "/" + name + ":" : ":" + name + ":";
+        Emoji existing = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
+        return existing instanceof EmojiFromRemote remote && remote.getChecksum()
+            .equals(checksum);
+    }
+
+    private static void pumpQueuedDownloads() {
+        while (activeDownloads.size() < MAX_ACTIVE_DOWNLOADS && !queuedDownloads.isEmpty()) {
+            String checksum = queuedDownloads.removeFirst();
+            if (findCachedEmoteFile(checksum) != null) {
+                requestedDownloads.remove(checksum);
+                continue;
+            }
+
+            activeDownloads.put(checksum, System.currentTimeMillis());
+            NetworkHandler.INSTANCE.sendToServer(new PacketEmoteDownloadRequest(checksum));
         }
     }
 
     private static void registerRemoteEmoji(String name, String checksum, File cacheFile, String category,
-        String namespace, boolean usable, boolean isIcon) {
-        var emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable);
-        // Always register short key
-        ClientEmojiHandler.EMOJI_LOOKUP.put(":" + name + ":", emoji);
-        ClientEmojiHandler.registerShortName(":" + name + ":", emoji);
-        // Register namespaced key if namespace is present (for wire format disambiguation)
-        if (namespace != null && !namespace.isEmpty()) {
-            ClientEmojiHandler.EMOJI_LOOKUP.put(":" + namespace + "/" + name + ":", emoji);
+        String namespace, String pua, boolean usable, boolean isIcon) {
+        EmojiFromRemote emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable);
+        boolean registerAlias = usable || pua == null || pua.isEmpty();
+        if (registerAlias) {
+            ClientEmojiHandler.EMOJI_LOOKUP.put(":" + name + ":", emoji);
+            ClientEmojiHandler.registerShortName(":" + name + ":", emoji);
+            if (namespace != null && !namespace.isEmpty()) {
+                ClientEmojiHandler.EMOJI_LOOKUP.put(":" + namespace + "/" + name + ":", emoji);
+                ClientEmojiHandler.registerShortName(":" + namespace + "/" + name + ":", emoji);
+            }
+        }
+        if (pua != null && pua.length() == 1) {
+            char puaChar = pua.charAt(0);
+            Emoji existing = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(puaChar);
+            if (existing == null || existing instanceof EmojiFromRemote) {
+                ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(puaChar, emoji);
+            }
         }
         if (usable) {
-            ClientEmojiHandler.EMOJI_MAP.computeIfAbsent(category, k -> new java.util.ArrayList<>())
+            ClientEmojiHandler.EMOJI_MAP.computeIfAbsent(category, ignored -> new ArrayList<>())
                 .add(emoji);
             ClientEmojiHandler.EMOJI_LIST.add(emoji);
             if (isIcon) {
@@ -259,17 +517,71 @@ public class EmoteClientHandler {
             }
             ClientEmojiHandler.buildPickerData();
         }
-        Minemoticon
-            .debug("Registered remote emote: {} (checksum {}, usable={}, icon={})", name, checksum, usable, isIcon);
+    }
+
+    private static String replacementForToken(String token) {
+        Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(token);
+        if (emoji == null) {
+            return null;
+        }
+        if (emoji instanceof EmojiFromRemote remote && !remote.isUsable()) {
+            return null;
+        }
+        String insert = getInsertTextForEmoji(emoji);
+        return insert == null || insert.isEmpty() ? null : insert;
+    }
+
+    private static String getInsertTextForPack(EmojiFromPack pack) {
+        if (!ServerCapabilities.hasServerMod()) {
+            return pack.getInsertText();
+        }
+
+        Character existingPackPua = sessionPuasByPackKey.get(pack.getNamespaced());
+        if (existingPackPua != null && EmojiPua.isPua(existingPackPua)) {
+            ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(existingPackPua, pack);
+            return String.valueOf(existingPackPua);
+        }
+
+        String checksum = checksumForPack(pack);
+        if (checksum == null) {
+            return pack.getInsertText();
+        }
+
+        Character existingPua = sessionPuasByChecksum.get(checksum);
+        if (existingPua != null && EmojiPua.isPua(existingPua)) {
+            sessionPuasByPackKey.put(pack.getNamespaced(), existingPua);
+            ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(existingPua, pack);
+            return String.valueOf(existingPua);
+        }
+
+        Character leasedPua = availablePuas.pollFirst();
+        if (leasedPua == null) {
+            return pack.getInsertText();
+        }
+
+        leasedPuas.remove(leasedPua);
+        PendingLocalPua pending = new PendingLocalPua(leasedPua, pack.name, pack.getPackFolder(), checksum, pack);
+        pendingLocalPuas.put(leasedPua, pending);
+        sessionPuasByChecksum.put(checksum, leasedPua);
+        sessionPuasByPackKey.put(pack.getNamespaced(), leasedPua);
+        ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(leasedPua, pack);
+        return String.valueOf(leasedPua);
+    }
+
+    private static EmojiFromPack findPackEmoji(String name, String namespace) {
+        Emoji emoji = namespace != null && !namespace.isEmpty()
+            ? ClientEmojiHandler.EMOJI_LOOKUP.get(":" + namespace + "/" + name + ":")
+            : null;
+        if (emoji == null) {
+            emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + name + ":");
+        }
+        return emoji instanceof EmojiFromPack pack ? pack : null;
     }
 
     private static String checksumForPack(EmojiFromPack pack) {
         try {
             byte[] data = sanitizePackForTransfer(pack);
-            if (data == null) {
-                return null;
-            }
-            return EmoteServerHandler.sha1(data);
+            return data == null ? null : EmoteServerHandler.sha1(data);
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to checksum pack emoji: {}", pack.name, e);
             return null;

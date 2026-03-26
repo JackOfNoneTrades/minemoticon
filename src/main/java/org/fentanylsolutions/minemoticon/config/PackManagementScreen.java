@@ -26,6 +26,7 @@ import org.fentanylsolutions.minemoticon.EmojiPackLoader;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.api.FileTexture;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.lwjgl.input.Keyboard;
 import org.lwjgl.input.Mouse;
@@ -1264,13 +1265,18 @@ public class PackManagementScreen extends GuiScreen implements DropListener {
         }
 
         boolean keyTyped(char typedChar, int keyCode) {
-            if (displayNameField.textboxKeyTyped(typedChar, keyCode)) {
-                return true;
+            EmoteClientHandler.beginInputSuppression();
+            try {
+                if (displayNameField.textboxKeyTyped(typedChar, keyCode)) {
+                    return true;
+                }
+                if (iconField.textboxKeyTyped(typedChar, keyCode)) {
+                    return true;
+                }
+                return selectedEmoji != null && selectedEmojiField.textboxKeyTyped(typedChar, keyCode);
+            } finally {
+                EmoteClientHandler.endInputSuppression();
             }
-            if (iconField.textboxKeyTyped(typedChar, keyCode)) {
-                return true;
-            }
-            return selectedEmoji != null && selectedEmojiField.textboxKeyTyped(typedChar, keyCode);
         }
 
         void blur() {
@@ -1681,9 +1687,14 @@ public class PackManagementScreen extends GuiScreen implements DropListener {
                 submit();
                 return;
             }
-            if (nameField.textboxKeyTyped(typedChar, keyCode)) {
-                errorText = null;
-                return;
+            EmoteClientHandler.beginInputSuppression();
+            try {
+                if (nameField.textboxKeyTyped(typedChar, keyCode)) {
+                    errorText = null;
+                    return;
+                }
+            } finally {
+                EmoteClientHandler.endInputSuppression();
             }
             super.keyTyped(typedChar, keyCode);
         }

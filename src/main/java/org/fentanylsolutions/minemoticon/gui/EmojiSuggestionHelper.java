@@ -11,6 +11,7 @@ import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.mixins.early.minecraft.AccessorGuiTextField;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.lwjgl.opengl.GL11;
 
@@ -234,7 +235,7 @@ public class EmojiSuggestionHelper {
         // Replace from colonStart to cursor with the emoji insert text
         String before = text.substring(0, colonStart);
         String after = text.substring(cursor);
-        String insert = emoji.getInsertText() + " ";
+        String insert = EmoteClientHandler.getInsertTextForEmoji(emoji) + " ";
 
         inputField.setText(before + insert + after);
         inputField.setCursorPosition(before.length() + insert.length());

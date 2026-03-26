@@ -12,6 +12,11 @@ public class ServerConfig {
 
     @Config.Comment("Max size in bytes for a client emote image")
     @Config.DefaultInt(32768)
-    @Config.RangeInt(min = 1024, max = 262144)
+    @Config.RangeInt(min = 1024, max = 9999999)
     public static int maxClientEmoteSize;
+
+    @Config.Comment("Persistent custom emoji quota per player in bytes")
+    @Config.DefaultInt(2097152)
+    @Config.RangeInt(min = 32768, max = 67108864)
+    public static int maxStoredClientEmojiBytesPerUser;
 }

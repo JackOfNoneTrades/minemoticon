@@ -214,13 +214,13 @@ public final class EmojiImageLoader {
 
     private static void validateDimensions(EmojiImageData imageData, boolean enforceMaxDimension, int maxDimension)
         throws IOException {
-        if (!enforceMaxDimension) {
-            return;
+        if (imageData.getFrameWidth() <= 0 || imageData.getFrameHeight() <= 0) {
+            throw new IOException("Emoji has invalid dimensions");
         }
-        if (imageData.getFrameWidth() > maxDimension || imageData.getFrameHeight() > maxDimension) {
+        if (imageData.getFrameWidth() > MAX_ATLAS_SIDE || imageData.getFrameHeight() > MAX_ATLAS_SIDE) {
             throw new IOException(
                 "Emoji dimensions " + imageData
-                    .getFrameWidth() + "x" + imageData.getFrameHeight() + " exceed max " + maxDimension);
+                    .getFrameWidth() + "x" + imageData.getFrameHeight() + " exceed safe max " + MAX_ATLAS_SIDE);
         }
     }
 

@@ -9,6 +9,8 @@ import net.minecraft.client.renderer.Tessellator;
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
+import org.fentanylsolutions.minemoticon.text.EmojiPua;
 import org.lwjgl.opengl.GL11;
 
 public class EmojiRenderer {
@@ -28,8 +30,34 @@ public class EmojiRenderer {
         int lastEnd = 0;
 
         for (int i = 0; i < text.length();) {
+            RenderableEmoji puaMatch = null;
+            char current = text.charAt(i);
+            if (EmojiPua.isPua(current)) {
+                EmoteClientHandler.onPuaObserved(current);
+            }
+            Emoji puaEmoji = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(current);
+            if (puaEmoji instanceof RenderableEmoji renderableEmoji) {
+                puaMatch = renderableEmoji;
+            }
+            if (puaMatch != null) {
+                if (segments == null) segments = new ArrayList<>();
+                if (i > lastEnd) segments.add(text.substring(lastEnd, i));
+                segments.add(puaMatch);
+                lastEnd = i + 1;
+                i = lastEnd;
+                continue;
+            }
+            if (EmojiPua.isPua(current)) {
+                if (segments == null) segments = new ArrayList<>();
+                if (i > lastEnd) segments.add(text.substring(lastEnd, i));
+                segments.add("\u25A0");
+                lastEnd = i + 1;
+                i = lastEnd;
+                continue;
+            }
+
             // Try :colon: syntax
-            if (text.charAt(i) == ':') {
+            if (current == ':') {
                 int end = text.indexOf(':', i + 1);
                 if (end != -1) {
                     String key = text.substring(i, end + 1);

@@ -9,15 +9,15 @@ import io.netty.buffer.ByteBuf;
 // Server -> Client: chunk of emote image data
 public class PacketEmoteDataDownload implements IMessage {
 
-    public String name;
+    public String checksum;
     public int chunkIndex;
     public int totalChunks;
     public byte[] data;
 
     public PacketEmoteDataDownload() {}
 
-    public PacketEmoteDataDownload(String name, int chunkIndex, int totalChunks, byte[] data) {
-        this.name = name;
+    public PacketEmoteDataDownload(String checksum, int chunkIndex, int totalChunks, byte[] data) {
+        this.checksum = checksum;
         this.chunkIndex = chunkIndex;
         this.totalChunks = totalChunks;
         this.data = data;
@@ -25,7 +25,7 @@ public class PacketEmoteDataDownload implements IMessage {
 
     @Override
     public void fromBytes(ByteBuf buf) {
-        name = ByteBufUtils.readUTF8String(buf);
+        checksum = ByteBufUtils.readUTF8String(buf);
         chunkIndex = buf.readInt();
         totalChunks = buf.readInt();
         int len = buf.readInt();
@@ -35,7 +35,7 @@ public class PacketEmoteDataDownload implements IMessage {
 
     @Override
     public void toBytes(ByteBuf buf) {
-        ByteBufUtils.writeUTF8String(buf, name);
+        ByteBufUtils.writeUTF8String(buf, checksum);
         buf.writeInt(chunkIndex);
         buf.writeInt(totalChunks);
         buf.writeInt(data.length);
@@ -46,7 +46,8 @@ public class PacketEmoteDataDownload implements IMessage {
 
         @Override
         public IMessage onMessage(PacketEmoteDataDownload message, MessageContext ctx) {
-            EmoteClientHandler.onEmoteDataDownload(message.name, message.chunkIndex, message.totalChunks, message.data);
+            EmoteClientHandler
+                .onEmoteDataDownload(message.checksum, message.chunkIndex, message.totalChunks, message.data);
             return null;
         }
     }

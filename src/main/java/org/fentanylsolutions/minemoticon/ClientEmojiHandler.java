@@ -37,6 +37,7 @@ public class ClientEmojiHandler {
     // Keyed by first char of the unicode string, values sorted longest-first
     public static final Map<Character, List<String>> UNICODE_KEYS_BY_CHAR = new HashMap<>();
     public static final Map<String, Emoji> EMOJI_UNICODE_LOOKUP = new HashMap<>();
+    public static final Map<Character, Emoji> EMOJI_PUA_LOOKUP = new HashMap<>();
     public static final List<String> CATEGORIES = new ArrayList<>();
     // Flat list: String (category name) or Emoji[] (row of up to 9)
     public static final List<Object> PICKER_LINES = new ArrayList<>();

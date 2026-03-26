@@ -18,19 +18,21 @@ public class PacketEmoteBroadcast implements IMessage {
     public String senderName;
     public String category;
     public String namespace; // sanitized folder name for namespaced :ns/name: syntax
+    public String pua;
     public byte type;
     public boolean isIcon;
 
     public PacketEmoteBroadcast() {}
 
     public PacketEmoteBroadcast(String name, String checksum, String senderName, byte type, String category,
-        String namespace, boolean isIcon) {
+        String namespace, String pua, boolean isIcon) {
         this.name = name;
         this.checksum = checksum;
         this.senderName = senderName;
         this.type = type;
         this.category = category != null ? category : "";
         this.namespace = namespace != null ? namespace : "";
+        this.pua = pua != null ? pua : "";
         this.isIcon = isIcon;
     }
 
@@ -42,6 +44,7 @@ public class PacketEmoteBroadcast implements IMessage {
         type = buf.readByte();
         category = ByteBufUtils.readUTF8String(buf);
         namespace = ByteBufUtils.readUTF8String(buf);
+        pua = ByteBufUtils.readUTF8String(buf);
         isIcon = buf.readBoolean();
     }
 
@@ -53,6 +56,7 @@ public class PacketEmoteBroadcast implements IMessage {
         buf.writeByte(type);
         ByteBufUtils.writeUTF8String(buf, category);
         ByteBufUtils.writeUTF8String(buf, namespace);
+        ByteBufUtils.writeUTF8String(buf, pua);
         buf.writeBoolean(isIcon);
     }
 
@@ -67,6 +71,7 @@ public class PacketEmoteBroadcast implements IMessage {
                 message.type,
                 message.category,
                 message.namespace,
+                message.pua,
                 message.isIcon);
             return null;
         }

@@ -3,13 +3,16 @@ package org.fentanylsolutions.minemoticon.mixins.early.minecraft;
 import net.minecraft.client.gui.GuiTextField;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyVariable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(GuiTextField.class)
-public class MixinGuiTextField {
+public abstract class MixinGuiTextField {
 
     private static final int MINEMOTICON$MAX_EMOJI_SEQUENCE_LENGTH = 32;
 
@@ -21,6 +24,15 @@ public class MixinGuiTextField {
 
     @Shadow
     private int selectionEnd;
+
+    @Shadow
+    public abstract boolean isFocused();
+
+    @Shadow
+    public abstract void setText(String text);
+
+    @Shadow
+    public abstract void setCursorPosition(int position);
 
     // Expand cursor movement to skip over full Unicode emoji sequences
     @ModifyVariable(method = "moveCursorBy", at = @At("HEAD"), argsOnly = true)
@@ -72,6 +84,22 @@ public class MixinGuiTextField {
     @ModifyVariable(method = "setSelectionPos", at = @At("HEAD"), argsOnly = true)
     private int minemoticon$snapSelectionPositionToEmojiBoundary(int position) {
         return snapToEmojiBoundary(position, selectionEnd);
+    }
+
+    @Inject(method = "writeText", at = @At("TAIL"))
+    private void minemoticon$substituteCompletedAlias(String insertedText, CallbackInfo ci) {
+        if (!isFocused()) {
+            return;
+        }
+
+        EmoteClientHandler.TextReplacement replacement = EmoteClientHandler
+            .substituteCompletedAlias(text, cursorPosition);
+        if (replacement == null) {
+            return;
+        }
+
+        setText(replacement.text);
+        setCursorPosition(replacement.cursorPosition);
     }
 
     // Walk backwards from pos to find the start of a Unicode emoji sequence ending at pos
