@@ -21,7 +21,7 @@ public class EmojiRenderer {
     public static final float EMOJI_SIZE = 10.0f;
     private static final int MAX_PARSE_CACHE_ENTRIES = 512;
     private static final int MAX_CACHED_TEXT_LENGTH = 256;
-    private static final ParseCacheEntry NO_MATCH = new ParseCacheEntry(null);
+    private static final ParseCacheEntry NO_MATCH = new ParseCacheEntry(null, null);
     private static final Map<String, ParseCacheEntry> PARSE_CACHE = new LinkedHashMap<String, ParseCacheEntry>(
         MAX_PARSE_CACHE_ENTRIES,
         0.75f,
@@ -47,11 +47,40 @@ public class EmojiRenderer {
             return cached.segments;
         }
 
-        List<Object> segments = null;
+        ParseResult parsed = parseInternal(text);
+        cacheParse(text, parsed, parsed.sawPua);
+        return parsed.segments;
+    }
+
+    public static List<ParsedSegment> parseDetailed(String text) {
+        if (bypass || ClientEmojiHandler.EMOJI_LOOKUP.isEmpty()) return null;
+
+        ParseCacheEntry cached = getCachedParse(text);
+        if (cached != null) {
+            return cached.detailedSegments;
+        }
+
+        ParseResult parsed = parseInternal(text);
+        cacheParse(text, parsed, parsed.sawPua);
+        return parsed.detailedSegments;
+    }
+
+    private static ParseResult parseInternal(String text) {
+        List<ParsedSegment> detailedSegments = null;
         int lastEnd = 0;
         boolean sawPua = false;
 
         for (int i = 0; i < text.length();) {
+            EscapeMatch escaped = matchEscapedEmoji(text, i);
+            if (escaped != null) {
+                if (detailedSegments == null) detailedSegments = new ArrayList<>();
+                if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
+                detailedSegments.add(ParsedSegment.text(escaped.literalText));
+                lastEnd = escaped.nextIndex;
+                i = lastEnd;
+                continue;
+            }
+
             RenderableEmoji puaMatch = null;
             char current = text.charAt(i);
             if (EmojiPua.isPua(current)) {
@@ -63,17 +92,17 @@ public class EmojiRenderer {
                 puaMatch = renderableEmoji;
             }
             if (puaMatch != null) {
-                if (segments == null) segments = new ArrayList<>();
-                if (i > lastEnd) segments.add(text.substring(lastEnd, i));
-                segments.add(puaMatch);
+                if (detailedSegments == null) detailedSegments = new ArrayList<>();
+                if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
+                detailedSegments.add(ParsedSegment.emoji(text.substring(i, i + 1), puaMatch));
                 lastEnd = i + 1;
                 i = lastEnd;
                 continue;
             }
             if (EmojiPua.isPua(current)) {
-                if (segments == null) segments = new ArrayList<>();
-                if (i > lastEnd) segments.add(text.substring(lastEnd, i));
-                segments.add("\u25A0");
+                if (detailedSegments == null) detailedSegments = new ArrayList<>();
+                if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
+                detailedSegments.add(ParsedSegment.text("\u25A0"));
                 lastEnd = i + 1;
                 i = lastEnd;
                 continue;
@@ -86,9 +115,9 @@ public class EmojiRenderer {
                     String key = text.substring(i, end + 1);
                     Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
                     if (emoji instanceof RenderableEmoji twitmoji) {
-                        if (segments == null) segments = new ArrayList<>();
-                        if (i > lastEnd) segments.add(text.substring(lastEnd, i));
-                        segments.add(twitmoji);
+                        if (detailedSegments == null) detailedSegments = new ArrayList<>();
+                        if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
+                        detailedSegments.add(ParsedSegment.emoji(key, twitmoji));
                         lastEnd = end + 1;
                         i = lastEnd;
                         continue;
@@ -113,9 +142,9 @@ public class EmojiRenderer {
                 }
             }
             if (unicodeMatch != null) {
-                if (segments == null) segments = new ArrayList<>();
-                if (i > lastEnd) segments.add(text.substring(lastEnd, i));
-                segments.add(unicodeMatch);
+                if (detailedSegments == null) detailedSegments = new ArrayList<>();
+                if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
+                detailedSegments.add(ParsedSegment.emoji(text.substring(i, i + matchLen), unicodeMatch));
                 lastEnd = i + matchLen;
                 i = lastEnd;
                 continue;
@@ -124,13 +153,64 @@ public class EmojiRenderer {
             i++;
         }
 
-        if (segments == null) return null;
+        if (detailedSegments == null) {
+            return ParseResult.noMatch();
+        }
 
         if (lastEnd < text.length()) {
-            segments.add(text.substring(lastEnd));
+            detailedSegments.add(ParsedSegment.text(text.substring(lastEnd)));
         }
-        cacheParse(text, segments, sawPua);
-        return segments;
+        return ParseResult.of(detailedSegments, sawPua);
+    }
+
+    private static EscapeMatch matchEscapedEmoji(String text, int index) {
+        if (index < 0 || index + 1 >= text.length() || text.charAt(index) != '\\') {
+            return null;
+        }
+
+        int escapedIndex = index + 1;
+        char escapedChar = text.charAt(escapedIndex);
+        if (EmojiPua.isPua(escapedChar)) {
+            Emoji emoji = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(escapedChar);
+            if (emoji instanceof RenderableEmoji renderableEmoji) {
+                return new EscapeMatch(getEscapedLiteralText(renderableEmoji), escapedIndex + 1);
+            }
+            return new EscapeMatch("\u25A0", escapedIndex + 1);
+        }
+
+        if (escapedChar == ':') {
+            int end = text.indexOf(':', escapedIndex + 1);
+            if (end != -1) {
+                String key = text.substring(escapedIndex, end + 1);
+                Emoji emoji = ClientEmojiHandler.EMOJI_LOOKUP.get(key);
+                if (emoji instanceof RenderableEmoji) {
+                    return new EscapeMatch(key, end + 1);
+                }
+            }
+        }
+
+        var candidates = ClientEmojiHandler.UNICODE_KEYS_BY_CHAR.get(escapedChar);
+        if (candidates != null) {
+            for (String candidate : candidates) {
+                if (text.startsWith(candidate, escapedIndex)) {
+                    Emoji emoji = ClientEmojiHandler.EMOJI_UNICODE_LOOKUP.get(candidate);
+                    if (emoji instanceof RenderableEmoji) {
+                        return new EscapeMatch(
+                            getEscapedLiteralText((RenderableEmoji) emoji),
+                            escapedIndex + candidate.length());
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static String getEscapedLiteralText(RenderableEmoji emoji) {
+        if (emoji instanceof Emoji minemoticonEmoji) {
+            return minemoticonEmoji.getShorterString();
+        }
+        return "emoji";
     }
 
     public static void invalidateParseCache() {
@@ -148,12 +228,14 @@ public class EmojiRenderer {
         }
     }
 
-    private static void cacheParse(String text, List<Object> segments, boolean sawPua) {
+    private static void cacheParse(String text, ParseResult parsed, boolean sawPua) {
         if (text == null || sawPua || text.length() > MAX_CACHED_TEXT_LENGTH) {
             return;
         }
-        ParseCacheEntry entry = segments == null ? NO_MATCH
-            : new ParseCacheEntry(Collections.unmodifiableList(new ArrayList<>(segments)));
+        ParseCacheEntry entry = parsed.segments == null ? NO_MATCH
+            : new ParseCacheEntry(
+                Collections.unmodifiableList(new ArrayList<>(parsed.segments)),
+                Collections.unmodifiableList(new ArrayList<>(parsed.detailedSegments)));
         synchronized (PARSE_CACHE) {
             PARSE_CACHE.put(text, entry);
         }
@@ -162,9 +244,82 @@ public class EmojiRenderer {
     private static final class ParseCacheEntry {
 
         private final List<Object> segments;
+        private final List<ParsedSegment> detailedSegments;
 
-        private ParseCacheEntry(List<Object> segments) {
+        private ParseCacheEntry(List<Object> segments, List<ParsedSegment> detailedSegments) {
             this.segments = segments;
+            this.detailedSegments = detailedSegments;
+        }
+    }
+
+    private static final class ParseResult {
+
+        private final List<Object> segments;
+        private final List<ParsedSegment> detailedSegments;
+        private final boolean sawPua;
+
+        private ParseResult(List<Object> segments, List<ParsedSegment> detailedSegments, boolean sawPua) {
+            this.segments = segments;
+            this.detailedSegments = detailedSegments;
+            this.sawPua = sawPua;
+        }
+
+        private static ParseResult noMatch() {
+            return new ParseResult(null, null, false);
+        }
+
+        private static ParseResult of(List<ParsedSegment> detailedSegments, boolean sawPua) {
+            List<Object> segments = new ArrayList<>(detailedSegments.size());
+            for (ParsedSegment segment : detailedSegments) {
+                if (segment.isEmoji()) {
+                    segments.add(segment.getEmoji());
+                } else {
+                    segments.add(segment.getText());
+                }
+            }
+            return new ParseResult(segments, detailedSegments, sawPua);
+        }
+    }
+
+    public static final class ParsedSegment {
+
+        private final String text;
+        private final RenderableEmoji emoji;
+
+        private ParsedSegment(String text, RenderableEmoji emoji) {
+            this.text = text;
+            this.emoji = emoji;
+        }
+
+        public static ParsedSegment text(String text) {
+            return new ParsedSegment(text, null);
+        }
+
+        public static ParsedSegment emoji(String text, RenderableEmoji emoji) {
+            return new ParsedSegment(text, emoji);
+        }
+
+        public String getText() {
+            return text;
+        }
+
+        public RenderableEmoji getEmoji() {
+            return emoji;
+        }
+
+        public boolean isEmoji() {
+            return emoji != null;
+        }
+    }
+
+    private static final class EscapeMatch {
+
+        private final String literalText;
+        private final int nextIndex;
+
+        private EscapeMatch(String literalText, int nextIndex) {
+            this.literalText = literalText;
+            this.nextIndex = nextIndex;
         }
     }
 
