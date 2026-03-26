@@ -29,6 +29,14 @@ public class ClientProxy extends CommonProxy {
     }
 
     @SubscribeEvent
+    public void onClientDisconnected(FMLNetworkEvent.ClientDisconnectionFromServerEvent event) {
+        Minemoticon.debug("Disconnected from server, clearing remote emoji state and cache");
+        ServerCapabilities.reset();
+        EmoteClientHandler.resetAndDeleteCache();
+        ServerEmojiManagerClient.reset();
+    }
+
+    @SubscribeEvent
     public void onClientTick(TickEvent.ClientTickEvent event) {
         if (event.phase == TickEvent.Phase.END) {
             EmoteClientHandler.tick();

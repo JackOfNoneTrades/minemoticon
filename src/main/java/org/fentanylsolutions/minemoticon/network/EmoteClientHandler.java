@@ -419,6 +419,14 @@ public class EmoteClientHandler {
     }
 
     public static void reset() {
+        reset(false);
+    }
+
+    public static void resetAndDeleteCache() {
+        reset(true);
+    }
+
+    private static void reset(boolean deleteCacheFiles) {
         pendingDownloads.clear();
         pendingAliases.clear();
         requestedDownloads.clear();
@@ -435,6 +443,9 @@ public class EmoteClientHandler {
         clearTransferPayloadCache();
         clearRemoteEmojis(true);
         ClientEmojiHandler.EMOJI_PUA_LOOKUP.clear();
+        if (deleteCacheFiles) {
+            deleteRemoteCacheFiles();
+        }
     }
 
     public static void tick() {
@@ -463,6 +474,29 @@ public class EmoteClientHandler {
 
     public static void invalidateTransferPayloadCache() {
         clearTransferPayloadCache();
+    }
+
+    private static void deleteRemoteCacheFiles() {
+        if (!CACHE_DIR.exists()) {
+            return;
+        }
+
+        File[] files = CACHE_DIR.listFiles();
+        if (files == null) {
+            return;
+        }
+
+        int deleted = 0;
+        for (File file : files) {
+            if (!file.isFile()) {
+                continue;
+            }
+            if (file.delete()) {
+                deleted++;
+            }
+        }
+
+        Minemoticon.debug("Deleted {} remote emote cache files", deleted);
     }
 
     private static void clearRemoteEmojis(boolean includeUsable) {
