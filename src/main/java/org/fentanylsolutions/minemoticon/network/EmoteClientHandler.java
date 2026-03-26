@@ -268,7 +268,17 @@ public class EmoteClientHandler {
 
         String emojiName = name != null && !name.isEmpty() ? ":" + name + ":" : "custom emoji";
         String detail = reason != null && !reason.isEmpty() ? reason : "Server rejected the emoji";
-        ChatComponentText message = new ChatComponentText("\u26A0 " + emojiName + " was rejected by the server: " + detail);
+        showClientWarning(emojiName + " was rejected by the server: " + detail);
+    }
+
+    private static void showPackTransferWarning(String emojiName, String reason) {
+        String key = emojiName != null && !emojiName.isEmpty() ? ":" + emojiName + ":" : "custom emoji";
+        String detail = reason != null && !reason.isEmpty() ? reason : "This emoji cannot be transferred";
+        showClientWarning(key + " cannot be sent to this server: " + detail);
+    }
+
+    private static void showClientWarning(String text) {
+        ChatComponentText message = new ChatComponentText("\u26A0 " + text);
         message.getChatStyle()
             .setColor(EnumChatFormatting.RED);
 
@@ -638,6 +648,7 @@ public class EmoteClientHandler {
             return data == null ? null : EmoteServerHandler.sha1(data);
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to checksum pack emoji: {}", pack.name, e);
+            showPackTransferWarning(pack.name, "Failed to read the local file");
             return null;
         }
     }
@@ -656,6 +667,7 @@ public class EmoteClientHandler {
                 .getBytes();
         } catch (IOException e) {
             Minemoticon.LOG.warn("Pack emoji {} is not transferable: {}", pack.name, e.getMessage());
+            showPackTransferWarning(pack.name, e.getMessage());
             return null;
         }
     }
