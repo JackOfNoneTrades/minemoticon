@@ -23,6 +23,7 @@ import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromRemote;
 import org.fentanylsolutions.minemoticon.image.EmojiImageLoader;
+import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.fentanylsolutions.minemoticon.text.EmojiPua;
 
 public class EmoteClientHandler {
@@ -580,6 +581,8 @@ public class EmoteClientHandler {
                 ClientEmojiHandler.PACK_CATEGORY_ICONS.putIfAbsent(category, emoji);
             }
             ClientEmojiHandler.buildPickerData();
+        } else {
+            EmojiRenderer.invalidateParseCache();
         }
     }
 

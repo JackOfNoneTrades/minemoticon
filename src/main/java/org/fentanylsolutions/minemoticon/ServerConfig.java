@@ -11,7 +11,7 @@ public class ServerConfig {
     public static boolean allowClientEmotes;
 
     @Config.Comment("Max size in bytes for a client emote image")
-    @Config.DefaultInt(32768)
+    @Config.DefaultInt(524288)
     @Config.RangeInt(min = 1024, max = 9999999)
     public static int maxClientEmoteSize;
 

@@ -22,6 +22,7 @@ import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
 import org.fentanylsolutions.minemoticon.colorfont.AtlasBuilder;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
 import org.fentanylsolutions.minemoticon.colorfont.EmojiAtlas;
+import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
@@ -486,6 +487,7 @@ public class ClientEmojiHandler {
     }
 
     public static void buildPickerData() {
+        EmojiRenderer.invalidateParseCache();
         CATEGORIES.clear();
         PICKER_LINES.clear();
         CATEGORY_LINE_INDEX.clear();
