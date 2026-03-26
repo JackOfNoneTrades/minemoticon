@@ -22,6 +22,7 @@ import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
 import org.fentanylsolutions.minemoticon.colorfont.AtlasBuilder;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
 import org.fentanylsolutions.minemoticon.colorfont.EmojiAtlas;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 
 import com.google.gson.JsonElement;
@@ -125,6 +126,7 @@ public class ClientEmojiHandler {
 
     public static void reloadPacks() {
         // Destroy old pack textures
+        EmoteClientHandler.invalidateTransferPayloadCache();
         for (var pack : PACK_EMOJIS) {
             pack.destroy();
             for (String key : pack.strings) {

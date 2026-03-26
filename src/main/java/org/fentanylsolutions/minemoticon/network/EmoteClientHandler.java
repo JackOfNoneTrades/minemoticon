@@ -7,6 +7,8 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -43,6 +45,8 @@ public class EmoteClientHandler {
     private static final File CACHE_DIR = new File("config/minemoticon/emote_cache");
     private static final int MAX_ACTIVE_DOWNLOADS = 2;
     private static final long DOWNLOAD_TIMEOUT_MS = 15000L;
+    private static final int MAX_TRANSFER_CACHE_ENTRIES = 16;
+    private static final long MAX_TRANSFER_CACHE_BYTES = 8L * 1024 * 1024;
 
     private static class PendingDownload {
 
@@ -94,6 +98,23 @@ public class EmoteClientHandler {
         }
     }
 
+    private static final class CachedTransferPayload {
+
+        final String cacheKey;
+        final long fileSize;
+        final long lastModified;
+        final byte[] data;
+        final String checksum;
+
+        CachedTransferPayload(String cacheKey, long fileSize, long lastModified, byte[] data, String checksum) {
+            this.cacheKey = cacheKey;
+            this.fileSize = fileSize;
+            this.lastModified = lastModified;
+            this.data = data;
+            this.checksum = checksum;
+        }
+    }
+
     private static final Map<String, PendingDownload> pendingDownloads = new HashMap<>();
     private static final Map<String, List<PendingAlias>> pendingAliases = new HashMap<>();
     private static final Set<String> requestedDownloads = new HashSet<>();
@@ -108,6 +129,9 @@ public class EmoteClientHandler {
     private static final Set<Character> requestedPuaRegistrations = new HashSet<>();
     private static final Set<Character> requestedPuaResolves = new HashSet<>();
     private static final Set<Character> missingPuas = new HashSet<>();
+    private static final LinkedHashMap<String, CachedTransferPayload> transferPayloadCache =
+        new LinkedHashMap<String, CachedTransferPayload>(MAX_TRANSFER_CACHE_ENTRIES, 0.75f, true);
+    private static long transferPayloadCacheBytes = 0L;
     private static int suppressedInputDepth = 0;
 
     public static void beginInputSuppression() {
@@ -177,38 +201,33 @@ public class EmoteClientHandler {
             return;
         }
 
-        try {
-            byte[] data = sanitizePackForTransfer(pack);
-            if (data == null) {
-                Minemoticon.debug("Pack emoji {} could not be sanitized for upload", name);
-                return;
-            }
-            String actualChecksum = EmoteServerHandler.sha1(data);
-            if (checksum != null && !checksum.isEmpty() && !checksum.equals(actualChecksum)) {
-                Minemoticon
-                    .debug("Upload checksum mismatch for {}: expected {}, got {}", name, checksum, actualChecksum);
-                return;
-            }
-
-            int totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
-            for (int i = 0; i < totalChunks; i++) {
-                int start = i * CHUNK_SIZE;
-                int end = Math.min(start + CHUNK_SIZE, data.length);
-                byte[] chunk = java.util.Arrays.copyOfRange(data, start, end);
-                NetworkHandler.INSTANCE.sendToServer(
-                    new PacketEmoteDataUpload(name, pack.getPackFolder(), actualChecksum, pua, i, totalChunks, chunk));
-            }
-
-            Minemoticon.debug(
-                "Uploading emote {} from {} ({} bytes, {} chunks, pua={})",
-                name,
-                pack.getPackFolder(),
-                data.length,
-                totalChunks,
-                pua);
-        } catch (IOException e) {
-            Minemoticon.LOG.error("Failed to read pack emoji file for upload: {}", name, e);
+        CachedTransferPayload transfer = getTransferPayload(pack);
+        if (transfer == null) {
+            Minemoticon.debug("Pack emoji {} could not be sanitized for upload", name);
+            return;
         }
+        if (checksum != null && !checksum.isEmpty() && !checksum.equals(transfer.checksum)) {
+            Minemoticon.debug("Upload checksum mismatch for {}: expected {}, got {}", name, checksum, transfer.checksum);
+            return;
+        }
+
+        byte[] data = transfer.data;
+        int totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        for (int i = 0; i < totalChunks; i++) {
+            int start = i * CHUNK_SIZE;
+            int end = Math.min(start + CHUNK_SIZE, data.length);
+            byte[] chunk = java.util.Arrays.copyOfRange(data, start, end);
+            NetworkHandler.INSTANCE.sendToServer(
+                new PacketEmoteDataUpload(name, pack.getPackFolder(), transfer.checksum, pua, i, totalChunks, chunk));
+        }
+
+        Minemoticon.debug(
+            "Uploading emote {} from {} ({} bytes, {} chunks, pua={})",
+            name,
+            pack.getPackFolder(),
+            data.length,
+            totalChunks,
+            pua);
     }
 
     public static void onEmoteBroadcast(String name, String checksum, String senderName, byte type, String category,
@@ -410,6 +429,7 @@ public class EmoteClientHandler {
         requestedPuaRegistrations.clear();
         requestedPuaResolves.clear();
         missingPuas.clear();
+        clearTransferPayloadCache();
         clearRemoteEmojis(true);
         ClientEmojiHandler.EMOJI_PUA_LOOKUP.clear();
     }
@@ -436,6 +456,10 @@ public class EmoteClientHandler {
 
     public static void clearRemoteEmojis() {
         clearRemoteEmojis(false);
+    }
+
+    public static void invalidateTransferPayloadCache() {
+        clearTransferPayloadCache();
     }
 
     private static void clearRemoteEmojis(boolean includeUsable) {
@@ -646,11 +670,33 @@ public class EmoteClientHandler {
     }
 
     private static String checksumForPack(EmojiFromPack pack) {
+        CachedTransferPayload transfer = getTransferPayload(pack);
+        return transfer != null ? transfer.checksum : null;
+    }
+
+    private static CachedTransferPayload getTransferPayload(EmojiFromPack pack) {
+        File imageFile = pack.getImageFile();
+        String cacheKey = imageFile.getAbsolutePath();
+        long fileSize = imageFile.length();
+        long lastModified = imageFile.lastModified();
+
+        CachedTransferPayload cached = getCachedTransferPayload(cacheKey, fileSize, lastModified);
+        if (cached != null) {
+            return cached;
+        }
+
         try {
             byte[] data = sanitizePackForTransfer(pack);
-            return data == null ? null : EmoteServerHandler.sha1(data);
+            if (data == null) {
+                return null;
+            }
+
+            CachedTransferPayload created =
+                new CachedTransferPayload(cacheKey, fileSize, lastModified, data, EmoteServerHandler.sha1(data));
+            cacheTransferPayload(created);
+            return created;
         } catch (IOException e) {
-            Minemoticon.LOG.error("Failed to checksum pack emoji: {}", pack.name, e);
+            Minemoticon.LOG.error("Failed to read pack emoji: {}", pack.name, e);
             showPackTransferWarning(pack.name, "Failed to read the local file");
             return null;
         }
@@ -673,5 +719,48 @@ public class EmoteClientHandler {
             showPackTransferWarning(pack.name, e.getMessage());
             return null;
         }
+    }
+
+    private static CachedTransferPayload getCachedTransferPayload(String cacheKey, long fileSize, long lastModified) {
+        CachedTransferPayload cached = transferPayloadCache.get(cacheKey);
+        if (cached == null) {
+            return null;
+        }
+        if (cached.fileSize == fileSize && cached.lastModified == lastModified) {
+            return cached;
+        }
+        removeTransferPayloadCacheEntry(cacheKey, cached);
+        return null;
+    }
+
+    private static void cacheTransferPayload(CachedTransferPayload entry) {
+        CachedTransferPayload previous = transferPayloadCache.put(entry.cacheKey, entry);
+        if (previous != null) {
+            transferPayloadCacheBytes -= previous.data.length;
+        }
+        transferPayloadCacheBytes += entry.data.length;
+        trimTransferPayloadCache();
+    }
+
+    private static void trimTransferPayloadCache() {
+        Iterator<Map.Entry<String, CachedTransferPayload>> iterator = transferPayloadCache.entrySet()
+            .iterator();
+        while ((transferPayloadCache.size() > MAX_TRANSFER_CACHE_ENTRIES || transferPayloadCacheBytes > MAX_TRANSFER_CACHE_BYTES)
+            && iterator.hasNext()) {
+            CachedTransferPayload eldest = iterator.next()
+                .getValue();
+            transferPayloadCacheBytes -= eldest.data.length;
+            iterator.remove();
+        }
+    }
+
+    private static void removeTransferPayloadCacheEntry(String cacheKey, CachedTransferPayload entry) {
+        transferPayloadCache.remove(cacheKey);
+        transferPayloadCacheBytes -= entry.data.length;
+    }
+
+    private static void clearTransferPayloadCache() {
+        transferPayloadCache.clear();
+        transferPayloadCacheBytes = 0L;
     }
 }
