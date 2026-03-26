@@ -11,6 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.util.ChatComponentText;
+import net.minecraft.util.EnumChatFormatting;
+
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
@@ -255,6 +259,56 @@ public class EmoteClientHandler {
         }
 
         queueDownloadRequest(checksum);
+    }
+
+    public static void onEmoteReject(String name, String reason, String pua) {
+        if (pua != null && pua.length() == 1 && EmojiPua.isPua(pua.charAt(0))) {
+            releaseRejectedPua(pua.charAt(0));
+        }
+
+        String emojiName = name != null && !name.isEmpty() ? ":" + name + ":" : "custom emoji";
+        String detail = reason != null && !reason.isEmpty() ? reason : "Server rejected the emoji";
+        ChatComponentText message = new ChatComponentText("\u26A0 " + emojiName + " was rejected by the server: " + detail);
+        message.getChatStyle()
+            .setColor(EnumChatFormatting.RED);
+
+        Minecraft mc = Minecraft.getMinecraft();
+        if (mc.ingameGUI != null) {
+            mc.ingameGUI.getChatGUI()
+                .printChatMessage(message);
+        } else {
+            Minemoticon.LOG.warn("{}", message.getUnformattedTextForChat());
+        }
+    }
+
+    private static void releaseRejectedPua(char pua) {
+        requestedPuaRegistrations.remove(pua);
+        requestedPuaResolves.remove(pua);
+        missingPuas.remove(pua);
+
+        PendingLocalPua pending = pendingLocalPuas.remove(pua);
+        if (pending != null) {
+            Character checksumPua = sessionPuasByChecksum.get(pending.checksum);
+            if (checksumPua != null && checksumPua == pua) {
+                sessionPuasByChecksum.remove(pending.checksum);
+            }
+
+            String packKey = ":" + pending.namespace + "/" + pending.name + ":";
+            Character packPua = sessionPuasByPackKey.get(packKey);
+            if (packPua != null && packPua == pua) {
+                sessionPuasByPackKey.remove(packKey);
+            }
+        }
+
+        Emoji existing = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(pua);
+        if (existing instanceof EmojiFromPack || existing instanceof EmojiFromRemote) {
+            ClientEmojiHandler.EMOJI_PUA_LOOKUP.remove(pua);
+        }
+
+        if (!availablePuas.contains(pua)) {
+            availablePuas.addFirst(pua);
+        }
+        leasedPuas.add(pua);
     }
 
     public static void onPuaLeaseGrant(String puas) {

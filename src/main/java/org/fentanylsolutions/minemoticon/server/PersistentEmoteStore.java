@@ -69,18 +69,20 @@ public final class PersistentEmoteStore {
     public static synchronized QuotaCheckResult checkQuota(String owner, String checksum, int sizeBytes) {
         StoreData data = getData();
         if (data == null) {
-            return QuotaCheckResult.denied(0, 0);
+            return QuotaCheckResult.denied(0, 0, 0, 0);
         }
 
         long used = data.getUsedBytes(owner);
+        int usedCount = data.getUsedCount(owner);
         long limit = ServerConfig.maxStoredClientEmojiBytesPerUser;
-        if (limit <= 0) {
-            return QuotaCheckResult.allowed(used, limit);
-        }
-
+        int countLimit = ServerConfig.maxStoredClientEmojiCountPerUser;
         long additional = data.ownerHasChecksum(owner, checksum) ? 0L : sizeBytes;
-        return used + additional <= limit ? QuotaCheckResult.allowed(used, limit)
-            : QuotaCheckResult.denied(used, limit);
+        int additionalCount = data.ownerHasChecksum(owner, checksum) ? 0 : 1;
+
+        boolean bytesAllowed = limit <= 0 || used + additional <= limit;
+        boolean countAllowed = countLimit <= 0 || usedCount + additionalCount <= countLimit;
+        return bytesAllowed && countAllowed ? QuotaCheckResult.allowed(used, limit, usedCount, countLimit)
+            : QuotaCheckResult.denied(used, limit, usedCount, countLimit);
     }
 
     public static synchronized StoreResult store(String owner, String name, String namespace, String checksum,
@@ -92,11 +94,9 @@ public final class PersistentEmoteStore {
 
         AssetMeta existing = data.assets.get(checksum);
         int sizeBytes = sanitizedPayload.length;
-        long usedBefore = data.getUsedBytes(owner);
-        long limit = ServerConfig.maxStoredClientEmojiBytesPerUser;
-        long additional = data.ownerHasChecksum(owner, checksum) ? 0L : sizeBytes;
-        if (limit > 0 && usedBefore + additional > limit) {
-            return StoreResult.quotaExceeded(usedBefore, limit);
+        QuotaCheckResult quota = checkQuota(owner, checksum, sanitizedPayload.length);
+        if (!quota.allowed) {
+            return StoreResult.quotaExceeded(quota.usedBytes, quota.quotaBytes, quota.usedCount, quota.quotaCount);
         }
 
         File storageDir = getStorageDir();
@@ -114,14 +114,20 @@ public final class PersistentEmoteStore {
 
         data.putOwnerEmoji(owner, checksum, name, namespace, preferredPua);
         data.markDirty();
-        return StoreResult.stored(data.getUsedBytes(owner), limit, checksum, extension);
+        return StoreResult.stored(
+            data.getUsedBytes(owner),
+            ServerConfig.maxStoredClientEmojiBytesPerUser,
+            data.getUsedCount(owner),
+            ServerConfig.maxStoredClientEmojiCountPerUser,
+            checksum,
+            extension);
     }
 
     public static synchronized StoreResult claimExisting(String owner, String name, String namespace, String checksum,
         char preferredPua) {
         StoreData data = getData();
         if (data == null) {
-            return StoreResult.quotaExceeded(0, 0);
+            return StoreResult.quotaExceeded(0, 0, 0, 0);
         }
 
         AssetMeta asset = data.assets.get(checksum);
@@ -129,16 +135,20 @@ public final class PersistentEmoteStore {
             return null;
         }
 
-        long usedBefore = data.getUsedBytes(owner);
-        long limit = ServerConfig.maxStoredClientEmojiBytesPerUser;
-        long additional = data.ownerHasChecksum(owner, checksum) ? 0L : asset.sizeBytes;
-        if (limit > 0 && usedBefore + additional > limit) {
-            return StoreResult.quotaExceeded(usedBefore, limit);
+        QuotaCheckResult quota = checkQuota(owner, checksum, asset.sizeBytes);
+        if (!quota.allowed) {
+            return StoreResult.quotaExceeded(quota.usedBytes, quota.quotaBytes, quota.usedCount, quota.quotaCount);
         }
 
         data.putOwnerEmoji(owner, checksum, name, namespace, preferredPua);
         data.markDirty();
-        return StoreResult.stored(data.getUsedBytes(owner), limit, checksum, asset.extension);
+        return StoreResult.stored(
+            data.getUsedBytes(owner),
+            ServerConfig.maxStoredClientEmojiBytesPerUser,
+            data.getUsedCount(owner),
+            ServerConfig.maxStoredClientEmojiCountPerUser,
+            checksum,
+            asset.extension);
     }
 
     public static synchronized List<OwnerEmojiEntry> getEntriesForOwner(String owner) {
@@ -156,6 +166,15 @@ public final class PersistentEmoteStore {
 
     public static synchronized long getQuotaBytes() {
         return ServerConfig.maxStoredClientEmojiBytesPerUser;
+    }
+
+    public static synchronized int getUsedCount(String owner) {
+        StoreData data = getData();
+        return data == null ? 0 : data.getUsedCount(owner);
+    }
+
+    public static synchronized int getQuotaCount() {
+        return ServerConfig.maxStoredClientEmojiCountPerUser;
     }
 
     public static synchronized byte[] readPayload(String checksum) throws IOException {
@@ -364,19 +383,23 @@ public final class PersistentEmoteStore {
         public final boolean allowed;
         public final long usedBytes;
         public final long quotaBytes;
+        public final int usedCount;
+        public final int quotaCount;
 
-        private QuotaCheckResult(boolean allowed, long usedBytes, long quotaBytes) {
+        private QuotaCheckResult(boolean allowed, long usedBytes, long quotaBytes, int usedCount, int quotaCount) {
             this.allowed = allowed;
             this.usedBytes = usedBytes;
             this.quotaBytes = quotaBytes;
+            this.usedCount = usedCount;
+            this.quotaCount = quotaCount;
         }
 
-        public static QuotaCheckResult allowed(long usedBytes, long quotaBytes) {
-            return new QuotaCheckResult(true, usedBytes, quotaBytes);
+        public static QuotaCheckResult allowed(long usedBytes, long quotaBytes, int usedCount, int quotaCount) {
+            return new QuotaCheckResult(true, usedBytes, quotaBytes, usedCount, quotaCount);
         }
 
-        public static QuotaCheckResult denied(long usedBytes, long quotaBytes) {
-            return new QuotaCheckResult(false, usedBytes, quotaBytes);
+        public static QuotaCheckResult denied(long usedBytes, long quotaBytes, int usedCount, int quotaCount) {
+            return new QuotaCheckResult(false, usedBytes, quotaBytes, usedCount, quotaCount);
         }
     }
 
@@ -386,25 +409,30 @@ public final class PersistentEmoteStore {
         public final boolean quotaExceeded;
         public final long usedBytes;
         public final long quotaBytes;
+        public final int usedCount;
+        public final int quotaCount;
         public final String checksum;
         public final String extension;
 
-        private StoreResult(boolean stored, boolean quotaExceeded, long usedBytes, long quotaBytes, String checksum,
-            String extension) {
+        private StoreResult(boolean stored, boolean quotaExceeded, long usedBytes, long quotaBytes, int usedCount,
+            int quotaCount, String checksum, String extension) {
             this.stored = stored;
             this.quotaExceeded = quotaExceeded;
             this.usedBytes = usedBytes;
             this.quotaBytes = quotaBytes;
+            this.usedCount = usedCount;
+            this.quotaCount = quotaCount;
             this.checksum = checksum;
             this.extension = extension;
         }
 
-        public static StoreResult stored(long usedBytes, long quotaBytes, String checksum, String extension) {
-            return new StoreResult(true, false, usedBytes, quotaBytes, checksum, extension);
+        public static StoreResult stored(long usedBytes, long quotaBytes, int usedCount, int quotaCount,
+            String checksum, String extension) {
+            return new StoreResult(true, false, usedBytes, quotaBytes, usedCount, quotaCount, checksum, extension);
         }
 
-        public static StoreResult quotaExceeded(long usedBytes, long quotaBytes) {
-            return new StoreResult(false, true, usedBytes, quotaBytes, "", "");
+        public static StoreResult quotaExceeded(long usedBytes, long quotaBytes, int usedCount, int quotaCount) {
+            return new StoreResult(false, true, usedBytes, quotaBytes, usedCount, quotaCount, "", "");
         }
     }
 
@@ -534,6 +562,11 @@ public final class PersistentEmoteStore {
                 }
             }
             return used;
+        }
+
+        private int getUsedCount(String owner) {
+            LinkedHashMap<String, OwnerAlias> aliases = owners.get(owner);
+            return aliases == null ? 0 : aliases.size();
         }
 
         private void putOwnerEmoji(String owner, String checksum, String name, String namespace, char preferredPua) {

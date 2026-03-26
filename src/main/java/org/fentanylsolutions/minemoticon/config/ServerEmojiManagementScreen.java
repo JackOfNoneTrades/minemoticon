@@ -55,6 +55,8 @@ public class ServerEmojiManagementScreen extends GuiScreen {
     private int scrollbarDragOffset;
     private long usedBytes;
     private long quotaBytes;
+    private int usedCount;
+    private int quotaCount;
     private String statusMessage;
     private String tooltipText;
     private int tooltipX;
@@ -225,6 +227,8 @@ public class ServerEmojiManagementScreen extends GuiScreen {
         entries.addAll(snapshot.entries);
         usedBytes = snapshot.usedBytes;
         quotaBytes = snapshot.quotaBytes;
+        usedCount = snapshot.usedCount;
+        quotaCount = snapshot.quotaCount;
         statusMessage = snapshot.statusMessage;
         recomputeMaxScroll();
     }
@@ -235,8 +239,8 @@ public class ServerEmojiManagementScreen extends GuiScreen {
         int barY = QUOTA_BAR_Y;
         Gui.drawRect(barX, barY, barX + barW, barY + 8, 0x40202020);
         Gui.drawRect(barX + 1, barY + 1, barX + barW - 1, barY + 7, 0x90000000);
-        if (quotaBytes > 0L) {
-            float fillRatio = Math.min(1.0F, (float) usedBytes / (float) quotaBytes);
+        float fillRatio = getQuotaFillRatio();
+        if (fillRatio > 0.0F) {
             int fillW = Math.max(0, Math.round((barW - 2) * fillRatio));
             int fillColor = fillRatio > 0.9F ? 0xFFE06464 : fillRatio > 0.7F ? 0xFFE0BC64 : 0xFF78D88A;
             Gui.drawRect(barX + 1, barY + 1, barX + 1 + fillW, barY + 7, fillColor);
@@ -469,10 +473,33 @@ public class ServerEmojiManagementScreen extends GuiScreen {
     }
 
     private String formatQuotaText() {
-        if (quotaBytes <= 0L) {
-            return entries.size() + " stored emoji, unlimited quota";
+        boolean hasCountQuota = quotaCount > 0;
+        boolean hasByteQuota = quotaBytes > 0L;
+        if (!hasCountQuota && !hasByteQuota) {
+            return usedCount + " stored emoji, unlimited quota";
         }
-        return entries.size() + " stored emoji, " + formatBytes(usedBytes) + " / " + formatBytes(quotaBytes);
+
+        List<String> parts = new ArrayList<>();
+        if (hasCountQuota) {
+            parts.add(usedCount + " / " + quotaCount + " emoji");
+        } else {
+            parts.add(usedCount + " stored emoji");
+        }
+        if (hasByteQuota) {
+            parts.add(formatBytes(usedBytes) + " / " + formatBytes(quotaBytes));
+        }
+        return String.join(", ", parts);
+    }
+
+    private float getQuotaFillRatio() {
+        float fillRatio = 0.0F;
+        if (quotaBytes > 0L) {
+            fillRatio = Math.max(fillRatio, Math.min(1.0F, (float) usedBytes / (float) quotaBytes));
+        }
+        if (quotaCount > 0) {
+            fillRatio = Math.max(fillRatio, Math.min(1.0F, (float) usedCount / (float) quotaCount));
+        }
+        return fillRatio;
     }
 
     private static String formatBytes(long bytes) {

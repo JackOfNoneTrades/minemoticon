@@ -117,7 +117,7 @@ public class EmoteServerHandler {
     public static void onPuaRegisterRequest(EntityPlayerMP player, char pua, String name, String namespace,
         String checksum) {
         if (!ServerConfig.allowClientEmotes) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Custom emotes disabled"), player);
+            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Custom emotes disabled", String.valueOf(pua)), player);
             return;
         }
 
@@ -127,13 +127,14 @@ public class EmoteServerHandler {
         }
 
         if (!isValidName(name) || (namespace != null && !namespace.isEmpty() && !isValidName(namespace))) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Invalid emote name"), player);
+            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Invalid emote name", String.valueOf(pua)), player);
             return;
         }
 
         String sender = player.getCommandSenderName();
         if (!consumeLeasedPua(sender, pua)) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Emoji reference is not available"), player);
+            NetworkHandler.INSTANCE
+                .sendTo(new PacketEmoteReject(name, "Emoji reference is not available", String.valueOf(pua)), player);
             return;
         }
 
@@ -144,12 +145,18 @@ public class EmoteServerHandler {
         if (persistent != null) {
             var claim = PersistentEmoteStore.claimExisting(sender, name, namespace, checksum, pua);
             if (claim == null) {
-                NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Unknown emote asset"), player);
+                restoreConsumedPua(sender, pua);
+                NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Unknown emote asset", String.valueOf(pua)), player);
                 return;
             }
             if (claim.quotaExceeded) {
-                NetworkHandler.INSTANCE
-                    .sendTo(new PacketEmoteReject(name, quotaMessage(claim.usedBytes, claim.quotaBytes)), player);
+                restoreConsumedPua(sender, pua);
+                NetworkHandler.INSTANCE.sendTo(
+                    new PacketEmoteReject(
+                        name,
+                        quotaMessage(claim.usedBytes, claim.quotaBytes, claim.usedCount, claim.quotaCount),
+                        String.valueOf(pua)),
+                    player);
                 return;
             }
 
@@ -284,6 +291,8 @@ public class EmoteServerHandler {
             new PacketServerEmojiListResponse(
                 PersistentEmoteStore.getUsedBytes(player.getCommandSenderName()),
                 PersistentEmoteStore.getQuotaBytes(),
+                PersistentEmoteStore.getUsedCount(player.getCommandSenderName()),
+                PersistentEmoteStore.getQuotaCount(),
                 statusMessage,
                 entries),
             player);
@@ -321,10 +330,12 @@ public class EmoteServerHandler {
         }
 
         if (totalSize > ServerConfig.maxClientEmoteSize) {
+            restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE.sendTo(
                 new PacketEmoteReject(
                     pending.name,
-                    "Emote too large (" + totalSize + " > " + ServerConfig.maxClientEmoteSize + ")"),
+                    "Emote too large (" + totalSize + " > " + ServerConfig.maxClientEmoteSize + ")",
+                    String.valueOf(pending.pua)),
                 player);
             return;
         }
@@ -338,25 +349,31 @@ public class EmoteServerHandler {
 
         byte[] sanitized = sanitize(raw, pending.name, true);
         if (sanitized == null) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(pending.name, "Invalid image data"), player);
+            restoreConsumedPua(pending.senderName, pending.pua);
+            NetworkHandler.INSTANCE
+                .sendTo(new PacketEmoteReject(pending.name, "Invalid image data", String.valueOf(pending.pua)), player);
             return;
         }
 
         if (sanitized.length > ServerConfig.maxClientEmoteSize) {
+            restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE.sendTo(
                 new PacketEmoteReject(
                     pending.name,
                     "Emote too large after sanitizing (" + sanitized.length
                         + " > "
                         + ServerConfig.maxClientEmoteSize
-                        + ")"),
+                        + ")",
+                    String.valueOf(pending.pua)),
                 player);
             return;
         }
 
         String checksum = sha1(sanitized);
         if (pending.checksum != null && !pending.checksum.isEmpty() && !pending.checksum.equals(checksum)) {
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(pending.name, "Checksum mismatch"), player);
+            restoreConsumedPua(pending.senderName, pending.pua);
+            NetworkHandler.INSTANCE
+                .sendTo(new PacketEmoteReject(pending.name, "Checksum mismatch", String.valueOf(pending.pua)), player);
             return;
         }
 
@@ -371,14 +388,21 @@ public class EmoteServerHandler {
                 extension,
                 pending.pua);
             if (result.quotaExceeded) {
+                restoreConsumedPua(pending.senderName, pending.pua);
                 NetworkHandler.INSTANCE.sendTo(
-                    new PacketEmoteReject(pending.name, quotaMessage(result.usedBytes, result.quotaBytes)),
+                    new PacketEmoteReject(
+                        pending.name,
+                        quotaMessage(result.usedBytes, result.quotaBytes, result.usedCount, result.quotaCount),
+                        String.valueOf(pending.pua)),
                     player);
                 return;
             }
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to persist uploaded emote {}", pending.name, e);
-            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(pending.name, "Failed to persist emote"), player);
+            restoreConsumedPua(pending.senderName, pending.pua);
+            NetworkHandler.INSTANCE.sendTo(
+                new PacketEmoteReject(pending.name, "Failed to persist emote", String.valueOf(pending.pua)),
+                player);
             return;
         }
 
@@ -547,11 +571,31 @@ public class EmoteServerHandler {
         return null;
     }
 
-    private static String quotaMessage(long usedBytes, long quotaBytes) {
-        if (quotaBytes <= 0) {
+    private static String quotaMessage(long usedBytes, long quotaBytes, int usedCount, int quotaCount) {
+        boolean hasByteQuota = quotaBytes > 0;
+        boolean hasCountQuota = quotaCount > 0;
+        if (!hasByteQuota && !hasCountQuota) {
             return "Emoji quota exceeded";
         }
-        return "Emoji quota exceeded (" + usedBytes + " / " + quotaBytes + " bytes used)";
+
+        List<String> parts = new ArrayList<>();
+        if (hasCountQuota) {
+            parts.add(usedCount + " / " + quotaCount + " emoji");
+        }
+        if (hasByteQuota) {
+            parts.add(formatBytes(usedBytes) + " / " + formatBytes(quotaBytes));
+        }
+        return "Emoji quota exceeded (" + String.join(", ", parts) + ")";
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes >= 1024L * 1024L) {
+            return String.format(java.util.Locale.ROOT, "%.1f MB", bytes / 1024.0 / 1024.0);
+        }
+        if (bytes >= 1024L) {
+            return String.format(java.util.Locale.ROOT, "%.1f KB", bytes / 1024.0);
+        }
+        return bytes + " B";
     }
 
     private static boolean isValidName(String name) {
@@ -723,6 +767,19 @@ public class EmoteServerHandler {
             return false;
         }
         return leasedPuaOwners.containsKey(pua) && owner.equals(leasedPuaOwners.get(pua));
+    }
+
+    private static void restoreConsumedPua(String owner, char pua) {
+        if (!EmojiPua.isPua(pua) || owner == null || !owner.equals(leasedPuaOwners.get(pua))) {
+            return;
+        }
+
+        ArrayDeque<Character> available = availablePuasByOwner.computeIfAbsent(owner, ignored -> new ArrayDeque<>());
+        if (!available.contains(pua)) {
+            available.addFirst(pua);
+        }
+        leasedPuasByOwner.computeIfAbsent(owner, ignored -> Collections.newSetFromMap(new ConcurrentHashMap<>()))
+            .add(pua);
     }
 
     private static void finalizeConsumedPua(String owner, char pua) {

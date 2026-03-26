@@ -15,15 +15,19 @@ public class PacketServerEmojiListResponse implements IMessage {
 
     public long usedBytes;
     public long quotaBytes;
+    public int usedCount;
+    public int quotaCount;
     public String statusMessage;
     public List<OwnerEmojiEntry> entries = new ArrayList<>();
 
     public PacketServerEmojiListResponse() {}
 
-    public PacketServerEmojiListResponse(long usedBytes, long quotaBytes, String statusMessage,
-        List<OwnerEmojiEntry> entries) {
+    public PacketServerEmojiListResponse(long usedBytes, long quotaBytes, int usedCount, int quotaCount,
+        String statusMessage, List<OwnerEmojiEntry> entries) {
         this.usedBytes = usedBytes;
         this.quotaBytes = quotaBytes;
+        this.usedCount = usedCount;
+        this.quotaCount = quotaCount;
         this.statusMessage = statusMessage != null ? statusMessage : "";
         this.entries = entries != null ? new ArrayList<>(entries) : new ArrayList<>();
     }
@@ -32,6 +36,8 @@ public class PacketServerEmojiListResponse implements IMessage {
     public void fromBytes(ByteBuf buf) {
         usedBytes = buf.readLong();
         quotaBytes = buf.readLong();
+        usedCount = buf.readInt();
+        quotaCount = buf.readInt();
         statusMessage = ByteBufUtils.readUTF8String(buf);
         int count = buf.readInt();
         entries = new ArrayList<>(count);
@@ -49,6 +55,8 @@ public class PacketServerEmojiListResponse implements IMessage {
     public void toBytes(ByteBuf buf) {
         buf.writeLong(usedBytes);
         buf.writeLong(quotaBytes);
+        buf.writeInt(usedCount);
+        buf.writeInt(quotaCount);
         ByteBufUtils.writeUTF8String(buf, statusMessage != null ? statusMessage : "");
         buf.writeInt(entries.size());
         for (OwnerEmojiEntry entry : entries) {
