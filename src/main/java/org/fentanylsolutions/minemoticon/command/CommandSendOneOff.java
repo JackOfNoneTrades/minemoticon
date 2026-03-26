@@ -1,4 +1,4 @@
-package org.fentanylsolutions.minemoticon;
+package org.fentanylsolutions.minemoticon.command;
 
 import java.io.File;
 import java.io.IOException;

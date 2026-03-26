@@ -2,6 +2,9 @@ package org.fentanylsolutions.minemoticon;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 
+import org.fentanylsolutions.minemoticon.command.CommandClearEmojis;
+import org.fentanylsolutions.minemoticon.command.CommandReloadEmojis;
+import org.fentanylsolutions.minemoticon.command.CommandSendOneOff;
 import org.fentanylsolutions.minemoticon.network.EmoteServerHandler;
 import org.fentanylsolutions.minemoticon.network.NetworkHandler;
 import org.fentanylsolutions.minemoticon.network.PacketServerPresence;

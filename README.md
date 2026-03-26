@@ -1,10 +1,8 @@
 # Minemoticon
 
-<!--
 ![logo](images/logo.png)
--->
 
-Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, animated custom emojis, picker, autocomplete, multiplayer sharing.
+Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, animated custom emojis, picker, autocomplete, multiplayer sharing, and emoji fonts.
 
 [![hub](images/badges/github.png)](https://github.com/JackOfNoneTrades/minemoticon/releases)
 [![maven](images/badges/maven.png)](https://maven.fentanylsolutions.org/#/releases/org/fentanylsolutions/minemoticon)
@@ -23,13 +21,14 @@ Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, animated custo
 
 * **Stock emojis** from [Twemoji](https://github.com/twitter/twemoji).
 * **Custom emoji packs** from local folders. Drop PNGs, JPGs, GIFs, QOI, or WebP files into `config/minemoticon/packs/<packname>/`. Supports `pack.meta` for display names and icons.
-* **Server emoji packs** synced to clients on join. Add pack folders in `config/minemoticon/server_packs/`. Animated GIF emojis are supported. Use `/reload_emojis` to reload packs on a live server.
-* **Multiplayer emote sharing**. If enabled, the server proxies user client emojis to other clients, including animated custom emojis. Clients can refuse third party emojis.
+* **Server emoji packs** synced to clients on join. Add pack folders in `config/minemoticon/server_packs/`. Animated GIF and WebP emojis are supported. Use `/reload_emojis` to reload packs on a live server.
+* **Multiplayer emote sharing**. If enabled, the server can store user custom emojis persistently and serve them to other clients, including animated custom emojis. Clients can refuse third party emojis.
 * **Emoji picker** in chat with categories/packs and search.
 * **Autocomplete suggestions** when typing `:emo...`.
 * **Unicode emoji input**. Paste `☃️` and it renders as Twemoji. Also supports `:colon:` syntax.
 * **Namespaced pack emojis** (`:pack_folder_name/emoji:`) to avoid collisions with stock emojis.
 * **Custom emoji font support (experimental)**. Drop TTF files into `config/minemoticon/fonts/`. Supports CBDT bitmaps, SVG-in-OT, COLRv0, FreeType-backed COLRv1, and monochrome outlines.
+* **Management GUIs** for client packs, emoji fonts, and your server-stored custom emoji cache.
 * **Emojis should works everywhere**: chat, signs, config GUIs, books.
 
 ### Config
@@ -39,12 +38,12 @@ All config lives under `config/minemoticon/`:
 | File/Folder | Purpose                                                                   |
 |---|---------------------------------------------------------------------------|
 | `minemoticon.cfg` | Client settings (twemoji toggle, picker behavior, font, debug)            |
-| `server.cfg` | Server settings (client emotes, max size). Synced to clients via GTNHLib. |
+| `server.cfg` | Server settings (client emotes, max size, persistent emoji quotas). Synced to clients via GTNHLib. |
 | `packs/` | Client emoji packs (subfolders with images + optional `pack.meta`)        |
 | `server_packs/` | Server emoji packs (same format, synced to clients on join)               |
 | `fonts/` | User TTF emoji fonts                                                      |
 | `cache/` | Atlas spritesheets (managed by the mod)                                   |
-| `emote_cache/` | Remote emote images/animations (cleared on disconnect)                    |
+| `emote_cache/` | Remote emote images/animations cached on disk                             |
 
 **pack.meta** example:
 ```json
@@ -59,6 +58,7 @@ All config lives under `config/minemoticon/`:
 | Command | Permission | Description |
 |---|---|---|
 | `/reload_emojis` | OP | Rescan server packs and resync all clients |
+| `/clear_emojis [player]` | OP | Clear all persistent custom emojis, or only one player's |
 
 ## Dependencies
 

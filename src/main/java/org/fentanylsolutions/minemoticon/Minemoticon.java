@@ -16,7 +16,12 @@ import cpw.mods.fml.common.event.FMLServerStartingEvent;
     name = "Minemoticon",
     acceptedMinecraftVersions = "[1.7.10]",
     acceptableRemoteVersions = "*",
-    guiFactory = "org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfigFactory")
+    guiFactory = "org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfigFactory",
+
+    customProperties = { @Mod.CustomProperty(k = "license", v = "LGPLv3+SNEED"),
+        @Mod.CustomProperty(k = "issueTrackerUrl", v = "https://github.com/JackOfNoneTrades/minemoticon/issues"),
+        @Mod.CustomProperty(k = "iconFile", v = "assets/minemoticon/icon.png"),
+        @Mod.CustomProperty(k = "backgroundFile", v = "assets/minemoticon/background.png") })
 public class Minemoticon {
 
     public static final String MODGROUP = "org.fentanylsolutions";

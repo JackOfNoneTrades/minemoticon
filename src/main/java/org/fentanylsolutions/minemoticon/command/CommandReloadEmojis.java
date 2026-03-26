@@ -1,4 +1,4 @@
-package org.fentanylsolutions.minemoticon;
+package org.fentanylsolutions.minemoticon.command;
 
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
