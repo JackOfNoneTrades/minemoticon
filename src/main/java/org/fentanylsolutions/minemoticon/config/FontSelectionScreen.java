@@ -198,7 +198,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
         drawDefaultBackground();
 
-        drawCenteredString(fontRendererObj, "Font Stack", width / 2, HEADER_Y, 0xFFFFFF);
+        drawCenteredString(fontRendererObj, "Fonts", width / 2, HEADER_Y, 0xFFFFFF);
 
         // Column headers
         drawCenteredString(fontRendererObj, "Available", leftX + leftW / 2, LIST_TOP - 10, 0xB8B8B8);
@@ -414,7 +414,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private void enableFont(FontEntry entry) {
         availableEntries.remove(entry);
         entry.enabled = true;
-        enabledEntries.add(entry);
+        enabledEntries.add(0, entry);
         dirty = true;
         refreshMetrics();
     }
@@ -531,7 +531,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
     private void renderStatus() {
         if (statusText == null || System.currentTimeMillis() > statusUntilMs) return;
-        drawCenteredString(fontRendererObj, statusText, width / 2, height - LIST_BOTTOM + 2, statusColor);
+        drawCenteredString(fontRendererObj, statusText, width / 2, height - 34, statusColor);
     }
 
     private void renderDragDropOverlay() {
@@ -1332,7 +1332,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             }
             drawCenteredString(fontRendererObj, title, width / 2, panelY + 20, 0xFFD0D0D0);
 
-            drawPreview(panelX + 10, panelY + 34);
+            drawPreview(panelX + 10, panelY + 34, mouseX, mouseY);
 
             int rowsY = panelY + 34 + getPreviewHeight() + 12;
             drawSizeRow(panelX, rowsY, mouseX, mouseY);
@@ -1396,29 +1396,31 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             return 1 + axes.size() + (entry.source.preserveTextLineMetrics() ? 2 : 0);
         }
 
-        private void drawPreview(int x, int y) {
+        private void drawPreview(int x, int y, int mouseX, int mouseY) {
             int previewH = getPreviewHeight();
             Gui.drawRect(x, y, x + PREVIEW_W, y + previewH, 0x40283040);
             parent.drawOutline(x, y, PREVIEW_W, previewH, 0x50FFFFFF);
-            int chatX = x + 8;
-            int chatY = y + 6;
-            int chatW = PREVIEW_W - 16;
-            int buttonW = Math.min(200, PREVIEW_W - 36);
-            int buttonX = x + (PREVIEW_W - buttonW) / 2;
-            int buttonY = y + previewH - 22;
-            int chatBottom = buttonY - 6;
-            int chatH = Math.max(22, chatBottom - chatY);
-            Gui.drawRect(chatX, chatY, chatX + chatW, chatY + chatH, 0x88202020);
+            int previewPad = 8;
+            int buttonW = 96;
+            int buttonH = 20;
+            int previewGap = 10;
+            int buttonX = x + PREVIEW_W - previewPad - buttonW;
+            int buttonY = y + (previewH - buttonH) / 2;
+            int chatX = x + previewPad;
+            int chatW = Math.max(80, buttonX - previewGap - chatX);
+            int chatStripeH = Math.min(34, Math.max(28, previewH - previewPad * 2));
+            int chatY = y + (previewH - chatStripeH) / 2;
+            Gui.drawRect(chatX, chatY, chatX + chatW, chatY + chatStripeH, 0x88202020);
 
             GuiButton previewButton = new GuiButton(-1337, buttonX, buttonY, buttonW, 20, "");
-            previewButton.drawButton(mc, -1000, -1000);
+            previewButton.drawButton(mc, mouseX, mouseY);
 
             if (entry.source.preserveTextLineMetrics() && previewFontStack != null) {
-                String buttonSample = "Singleplayer";
+                String buttonSample = "Button";
                 int textColor = 0xE0E0E0;
 
                 runWithPreviewFontStack(() -> {
-                    drawPreviewChat(chatX, chatY, chatW, chatH, textColor);
+                    drawPreviewChat(chatX, chatY, chatW, chatStripeH, textColor);
                     int buttonTextWidth = fontRendererObj.getStringWidth(buttonSample);
                     int buttonTextX = buttonX + (buttonW - buttonTextWidth) / 2;
                     int buttonTextY = buttonY + 6;
