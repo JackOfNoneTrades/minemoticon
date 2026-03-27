@@ -120,6 +120,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private int statusColor = 0xFFB0B0B0;
     private long statusUntilMs;
     private volatile boolean dragDropActive;
+    private float dragDropSdlX = -1.0F;
+    private float dragDropSdlY = -1.0F;
     private boolean dirty;
 
     public FontSelectionScreen(GuiScreen parent) {
@@ -212,6 +214,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     public void onGuiClosed() {
         WindowDropTarget.removeListener(this);
         dragDropActive = false;
+        dragDropSdlX = -1.0F;
+        dragDropSdlY = -1.0F;
         synchronized (droppedFilePaths) {
             droppedFilePaths.clear();
         }
@@ -489,8 +493,31 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
     private void renderDragDropOverlay() {
         if (!dragDropActive) return;
-        Gui.drawRect(leftX, leftY, leftX + leftW, leftY + leftH, 0x40000000);
-        drawCenteredString(fontRendererObj, "Drop TTF/OTF here", leftX + leftW / 2, leftY + leftH / 2 - 4, 0xFF8FD9FF);
+        int[] dropZone = getDropZoneBounds();
+        int zoneX = dropZone[0];
+        int zoneY = dropZone[1];
+        int zoneW = dropZone[2];
+        int zoneH = dropZone[3];
+        boolean hovered = isDropZoneHovered();
+
+        Gui.drawRect(0, 0, width, height, 0x14000000);
+        Gui.drawRect(zoneX, zoneY, zoneX + zoneW, zoneY + zoneH, hovered ? 0x58275EA8 : 0x40193458);
+        Gui.drawRect(zoneX + 2, zoneY + 2, zoneX + zoneW - 2, zoneY + zoneH - 2, hovered ? 0x320B1120 : 0x24090E16);
+        drawOutline(zoneX, zoneY, zoneW, zoneH, hovered ? 0xE08FD8FF : 0xB06DB8E8);
+        drawOutline(zoneX + 2, zoneY + 2, zoneW - 4, zoneH - 4, hovered ? 0x607FCBFF : 0x40639BC6);
+
+        drawCenteredString(
+            fontRendererObj,
+            "Drop font files here",
+            zoneX + zoneW / 2,
+            zoneY + zoneH / 2 - 14,
+            hovered ? 0xFFE8F0F7 : 0xFFDAE4EE);
+        drawCenteredString(
+            fontRendererObj,
+            "TTF and OTF supported",
+            zoneX + zoneW / 2,
+            zoneY + zoneH / 2 + 8,
+            hovered ? 0xFFCBE9FF : 0xFFAACDE3);
     }
 
     private void renderPreviewStrip(PreviewTexture preview, int x, int y, int displaySize) {
@@ -799,13 +826,18 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     public void onDragBegin() {
         if (Minecraft.getMinecraft().currentScreen != this) return;
         dragDropActive = true;
+        dragDropSdlX = -1.0F;
+        dragDropSdlY = -1.0F;
         synchronized (droppedFilePaths) {
             droppedFilePaths.clear();
         }
     }
 
     @Override
-    public void onDragPosition(float sdlX, float sdlY) {}
+    public void onDragPosition(float sdlX, float sdlY) {
+        dragDropSdlX = sdlX;
+        dragDropSdlY = sdlY;
+    }
 
     @Override
     public void onDropFile(String filePath, float sdlX, float sdlY) {
@@ -817,7 +849,16 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     @Override
     public void onDragComplete(WindowDropTarget.DropResult result) {
         dragDropActive = false;
+        dragDropSdlX = result.getSdlX();
+        dragDropSdlY = result.getSdlY();
         if (Minecraft.getMinecraft().currentScreen != this) {
+            synchronized (droppedFilePaths) {
+                droppedFilePaths.clear();
+            }
+            return;
+        }
+
+        if (!isInsideDropZone(result.getSdlX(), result.getSdlY())) {
             synchronized (droppedFilePaths) {
                 droppedFilePaths.clear();
             }
@@ -891,6 +932,35 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
     private static boolean isInside(int mx, int my, int x, int y, int w, int h) {
         return mx >= x && mx < x + w && my >= y && my < y + h;
+    }
+
+    private int[] getDropZoneBounds() {
+        int zoneW = Math.min(width - PANEL_MARGIN * 6, 404);
+        int zoneH = 80;
+        int zoneX = (width - zoneW) / 2;
+        int contentTop = LIST_TOP + 12;
+        int contentBottom = height - LIST_BOTTOM - 36;
+        int zoneY = contentTop + Math.max(0, (contentBottom - contentTop - zoneH) / 2);
+        return new int[] { zoneX, zoneY, zoneW, zoneH };
+    }
+
+    private boolean isDropZoneHovered() {
+        return dragDropActive && isInsideDropZone(dragDropSdlX, dragDropSdlY);
+    }
+
+    private boolean isInsideDropZone(float sdlX, float sdlY) {
+        if (sdlX < 0.0F || sdlY < 0.0F) {
+            return false;
+        }
+        float[] guiCoords = WindowDropTarget.sdlToGuiCoords(sdlX, sdlY);
+        int[] dropZone = getDropZoneBounds();
+        return isInside(
+            Math.round(guiCoords[0]),
+            Math.round(guiCoords[1]),
+            dropZone[0],
+            dropZone[1],
+            dropZone[2],
+            dropZone[3]);
     }
 
     private static String sanitizeFontFilename(String name) {
