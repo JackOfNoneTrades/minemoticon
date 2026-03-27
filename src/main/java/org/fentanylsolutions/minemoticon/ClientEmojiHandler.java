@@ -18,7 +18,9 @@ import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromAtlas;
 import org.fentanylsolutions.minemoticon.api.EmojiFromFont;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
+import org.fentanylsolutions.minemoticon.api.EmojiFromResource;
 import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
+import org.fentanylsolutions.minemoticon.api.MinemoticonApi;
 import org.fentanylsolutions.minemoticon.colorfont.AtlasBuilder;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
 import org.fentanylsolutions.minemoticon.colorfont.EmojiAtlas;
@@ -57,6 +59,7 @@ public class ClientEmojiHandler {
         "Food & Drink", "Travel & Places", "Activities", "Objects", "Symbols", "Flags" };
     // Pack emojis tracked separately for reload cleanup
     private static final List<EmojiFromPack> PACK_EMOJIS = new ArrayList<>();
+    private static final List<EmojiFromResource> RESOURCE_EMOJIS = new ArrayList<>();
     // Maps pack category name -> icon emoji (for category pill in picker)
     public static final Map<String, Emoji> PACK_CATEGORY_ICONS = new HashMap<>();
     public static boolean error = false;
@@ -110,6 +113,7 @@ public class ClientEmojiHandler {
 
         // Load packs synchronously (local files, fast)
         loadPacks();
+        reloadResourceEmojis(false);
 
         // Load twemoji from bundled/cached data synchronously (instant, no network)
         if (EmojiConfig.enableTwemoji) {
@@ -180,8 +184,34 @@ public class ClientEmojiHandler {
         PACK_CATEGORY_ICONS.clear();
 
         loadPacks();
+        reloadResourceEmojis(false);
         buildPickerData();
         Minemoticon.LOG.info("Reloaded packs: {} pack emojis", PACK_EMOJIS.size());
+    }
+
+    public static void reloadResourceEmojis() {
+        reloadResourceEmojis(true);
+    }
+
+    private static void reloadResourceEmojis(boolean rebuildPicker) {
+        clearResourceEmojis();
+        for (var registration : MinemoticonApi.getRegisteredResourceEmojis()) {
+            EmojiFromResource emoji = new EmojiFromResource(
+                registration.prefix,
+                registration.name,
+                registration.category,
+                registration.resourceLocation);
+            EMOJI_LOOKUP.put(emoji.getNamespaced(), emoji);
+            registerShortName(emoji.getNamespaced(), emoji);
+            EMOJI_MAP.computeIfAbsent(registration.category, ignored -> new ArrayList<>())
+                .add(emoji);
+            EMOJI_LIST.add(emoji);
+            RESOURCE_EMOJIS.add(emoji);
+            PACK_CATEGORY_ICONS.putIfAbsent(registration.category, emoji);
+        }
+        if (rebuildPicker) {
+            buildPickerData();
+        }
     }
 
     private static void loadPacks() {
@@ -213,6 +243,27 @@ public class ClientEmojiHandler {
                 PACK_CATEGORY_ICONS.put(pack.displayName, iconEmoji);
             }
         }
+    }
+
+    private static void clearResourceEmojis() {
+        for (var emoji : RESOURCE_EMOJIS) {
+            emoji.destroy();
+            for (String key : emoji.strings) {
+                EMOJI_LOOKUP.remove(key);
+            }
+            EMOJI_LIST.remove(emoji);
+        }
+        EMOJI_BY_SHORT_NAME.values()
+            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromResource));
+        EMOJI_BY_SHORT_NAME.values()
+            .removeIf(List::isEmpty);
+        EMOJI_MAP.values()
+            .forEach(list -> list.removeIf(e -> e instanceof EmojiFromResource));
+        EMOJI_MAP.values()
+            .removeIf(List::isEmpty);
+        PACK_CATEGORY_ICONS.entrySet()
+            .removeIf(entry -> entry.getValue() instanceof EmojiFromResource);
+        RESOURCE_EMOJIS.clear();
     }
 
     public static final File FONTS_DIR = new File("config/minemoticon/fonts");
