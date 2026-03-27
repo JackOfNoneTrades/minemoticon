@@ -256,7 +256,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             return;
         }
 
-        if (!shadow) {
+        if (!shadow || source.usesTextColor()) {
             float x0 = this.posX;
             float y0 = this.posY + (8.0f - displayHeight) * 0.5f;
             float x1 = x0 + width;
@@ -287,7 +287,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             }
         }
 
-        if (!shadow && source.usesTextColor() && this.boldStyle) {
+        if (source.usesTextColor() && this.boldStyle) {
             float x0 = this.posX + 1.0f;
             float y0 = this.posY + (8.0f - displayHeight) * 0.5f;
             float x1 = x0 + width;
