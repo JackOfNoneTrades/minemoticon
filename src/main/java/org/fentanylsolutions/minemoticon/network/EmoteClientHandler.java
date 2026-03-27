@@ -83,14 +83,14 @@ public class EmoteClientHandler {
 
     private static class PendingLocalPua {
 
-        final char pua;
+        final String pua;
         final String name;
         final String namespace;
         final String checksum;
         final EmojiFromPack pack;
 
-        PendingLocalPua(char pua, String name, String namespace, String checksum, EmojiFromPack pack) {
-            this.pua = pua;
+        PendingLocalPua(String pua, String name, String namespace, String checksum, EmojiFromPack pack) {
+            this.pua = pua != null ? pua : "";
             this.name = name;
             this.namespace = namespace != null ? namespace : "";
             this.checksum = checksum;
@@ -121,14 +121,14 @@ public class EmoteClientHandler {
     private static final ArrayDeque<String> queuedDownloads = new ArrayDeque<>();
     private static final Map<String, Long> activeDownloads = new HashMap<>();
 
-    private static final Map<Character, PendingLocalPua> pendingLocalPuas = new HashMap<>();
-    private static final Map<String, Character> sessionPuasByChecksum = new HashMap<>();
-    private static final Map<String, Character> sessionPuasByPackKey = new HashMap<>();
-    private static final ArrayDeque<Character> availablePuas = new ArrayDeque<>();
-    private static final Set<Character> leasedPuas = new HashSet<>();
-    private static final Set<Character> requestedPuaRegistrations = new HashSet<>();
-    private static final Set<Character> requestedPuaResolves = new HashSet<>();
-    private static final Set<Character> missingPuas = new HashSet<>();
+    private static final Map<String, PendingLocalPua> pendingLocalPuas = new HashMap<>();
+    private static final Map<String, String> sessionPuasByChecksum = new HashMap<>();
+    private static final Map<String, String> sessionPuasByPackKey = new HashMap<>();
+    private static final ArrayDeque<String> availablePuas = new ArrayDeque<>();
+    private static final Set<String> leasedPuas = new HashSet<>();
+    private static final Set<String> requestedPuaRegistrations = new HashSet<>();
+    private static final Set<String> requestedPuaResolves = new HashSet<>();
+    private static final Set<String> missingPuas = new HashSet<>();
     private static final LinkedHashMap<String, CachedTransferPayload> transferPayloadCache = new LinkedHashMap<String, CachedTransferPayload>(
         MAX_TRANSFER_CACHE_ENTRIES,
         0.75f,
@@ -196,7 +196,7 @@ public class EmoteClientHandler {
     }
 
     public static void onUploadRequest(String name, String namespace, String checksum, String pua) {
-        PendingLocalPua pendingLocal = pua != null && pua.length() == 1 ? pendingLocalPuas.get(pua.charAt(0)) : null;
+        PendingLocalPua pendingLocal = EmojiPua.isPuaToken(pua) ? pendingLocalPuas.get(pua) : null;
         EmojiFromPack pack = pendingLocal != null ? pendingLocal.pack : findPackEmoji(name, namespace);
         if (pack == null) {
             Minemoticon.debug("Upload requested for unknown pack emoji: {} ({})", name, namespace);
@@ -251,15 +251,14 @@ public class EmoteClientHandler {
             effectiveCategory,
             pua);
 
-        if (pua != null && pua.length() == 1) {
-            char puaChar = pua.charAt(0);
-            requestedPuaResolves.remove(puaChar);
-            missingPuas.remove(puaChar);
-            requestedPuaRegistrations.remove(puaChar);
-            PendingLocalPua pendingLocal = pendingLocalPuas.remove(puaChar);
+        if (EmojiPua.isPuaToken(pua)) {
+            requestedPuaResolves.remove(pua);
+            missingPuas.remove(pua);
+            requestedPuaRegistrations.remove(pua);
+            PendingLocalPua pendingLocal = pendingLocalPuas.remove(pua);
             if (pendingLocal != null && checksum != null && !checksum.isEmpty()) {
-                sessionPuasByChecksum.put(checksum, puaChar);
-                sessionPuasByPackKey.put(":" + pendingLocal.namespace + "/" + pendingLocal.name + ":", puaChar);
+                sessionPuasByChecksum.put(checksum, pua);
+                sessionPuasByPackKey.put(pendingLocal.pack.getNamespaced(), pua);
                 return;
             }
         }
@@ -285,8 +284,8 @@ public class EmoteClientHandler {
     }
 
     public static void onEmoteReject(String name, String reason, String pua) {
-        if (pua != null && pua.length() == 1 && EmojiPua.isPua(pua.charAt(0))) {
-            releaseRejectedPua(pua.charAt(0));
+        if (EmojiPua.isPuaToken(pua)) {
+            releaseRejectedPua(pua);
         }
 
         String emojiName = name != null && !name.isEmpty() ? ":" + name + ":" : "custom emoji";
@@ -314,21 +313,21 @@ public class EmoteClientHandler {
         }
     }
 
-    private static void releaseRejectedPua(char pua) {
+    private static void releaseRejectedPua(String pua) {
         requestedPuaRegistrations.remove(pua);
         requestedPuaResolves.remove(pua);
         missingPuas.remove(pua);
 
         PendingLocalPua pending = pendingLocalPuas.remove(pua);
         if (pending != null) {
-            Character checksumPua = sessionPuasByChecksum.get(pending.checksum);
-            if (checksumPua != null && checksumPua == pua) {
+            String checksumPua = sessionPuasByChecksum.get(pending.checksum);
+            if (pua.equals(checksumPua)) {
                 sessionPuasByChecksum.remove(pending.checksum);
             }
 
-            String packKey = ":" + pending.namespace + "/" + pending.name + ":";
-            Character packPua = sessionPuasByPackKey.get(packKey);
-            if (packPua != null && packPua == pua) {
+            String packKey = pending.pack.getNamespaced();
+            String packPua = sessionPuasByPackKey.get(packKey);
+            if (pua.equals(packPua)) {
                 sessionPuasByPackKey.remove(packKey);
             }
         }
@@ -348,9 +347,8 @@ public class EmoteClientHandler {
         if (puas == null || puas.isEmpty()) {
             return;
         }
-        for (int i = 0; i < puas.length(); i++) {
-            char pua = puas.charAt(i);
-            if (!EmojiPua.isPua(pua) || leasedPuas.contains(pua) || availablePuas.contains(pua)) {
+        for (String pua : EmojiPua.decodeLeasePayload(puas)) {
+            if (!EmojiPua.isPuaToken(pua) || leasedPuas.contains(pua) || availablePuas.contains(pua)) {
                 continue;
             }
             leasedPuas.add(pua);
@@ -360,23 +358,22 @@ public class EmoteClientHandler {
 
     public static void onPuaResolveResponse(String pua, boolean found, String name, String checksum, String senderName,
         String namespace) {
-        if (pua == null || pua.length() != 1 || !EmojiPua.isPua(pua.charAt(0))) {
+        if (!EmojiPua.isPuaToken(pua)) {
             return;
         }
 
-        char puaChar = pua.charAt(0);
-        requestedPuaResolves.remove(puaChar);
+        requestedPuaResolves.remove(pua);
         if (!found) {
-            missingPuas.add(puaChar);
+            missingPuas.add(pua);
             return;
         }
 
-        missingPuas.remove(puaChar);
+        missingPuas.remove(pua);
         onEmoteBroadcast(name, checksum, senderName, PacketEmoteBroadcast.TYPE_CLIENT_EMOTE, "", namespace, pua, false);
     }
 
-    public static void onPuaObserved(char pua) {
-        if (!ServerCapabilities.hasServerMod() || !EmojiPua.isPua(pua)) {
+    public static void onPuaObserved(String pua) {
+        if (!ServerCapabilities.hasServerMod() || !EmojiPua.isPuaToken(pua)) {
             return;
         }
 
@@ -385,7 +382,7 @@ public class EmoteClientHandler {
             if (requestedPuaRegistrations.add(pua)) {
                 NetworkHandler.INSTANCE.sendToServer(
                     new PacketPuaRegisterRequest(
-                        String.valueOf(pua),
+                        pua,
                         pendingLocal.name,
                         pendingLocal.namespace,
                         pendingLocal.checksum));
@@ -398,7 +395,7 @@ public class EmoteClientHandler {
         }
 
         if (requestedPuaResolves.add(pua)) {
-            NetworkHandler.INSTANCE.sendToServer(new PacketPuaResolveRequest(String.valueOf(pua)));
+            NetworkHandler.INSTANCE.sendToServer(new PacketPuaResolveRequest(pua));
         }
     }
 
@@ -625,11 +622,10 @@ public class EmoteClientHandler {
                 ClientEmojiHandler.registerShortName(":" + namespace + "/" + name + ":", emoji);
             }
         }
-        if (pua != null && pua.length() == 1) {
-            char puaChar = pua.charAt(0);
-            Emoji existing = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(puaChar);
+        if (EmojiPua.isPuaToken(pua)) {
+            Emoji existing = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(pua);
             if (existing == null || existing instanceof EmojiFromRemote) {
-                ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(puaChar, emoji);
+                ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(pua, emoji);
             }
         }
         if (usable) {
@@ -664,10 +660,10 @@ public class EmoteClientHandler {
             return pack.getInsertText();
         }
 
-        Character existingPackPua = sessionPuasByPackKey.get(pack.getNamespaced());
-        if (existingPackPua != null && EmojiPua.isPua(existingPackPua)) {
+        String existingPackPua = sessionPuasByPackKey.get(pack.getNamespaced());
+        if (EmojiPua.isPuaToken(existingPackPua)) {
             ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(existingPackPua, pack);
-            return String.valueOf(existingPackPua);
+            return existingPackPua;
         }
 
         String checksum = checksumForPack(pack);
@@ -675,14 +671,14 @@ public class EmoteClientHandler {
             return pack.getInsertText();
         }
 
-        Character existingPua = sessionPuasByChecksum.get(checksum);
-        if (existingPua != null && EmojiPua.isPua(existingPua)) {
+        String existingPua = sessionPuasByChecksum.get(checksum);
+        if (EmojiPua.isPuaToken(existingPua)) {
             sessionPuasByPackKey.put(pack.getNamespaced(), existingPua);
             ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(existingPua, pack);
-            return String.valueOf(existingPua);
+            return existingPua;
         }
 
-        Character leasedPua = availablePuas.pollFirst();
+        String leasedPua = availablePuas.pollFirst();
         if (leasedPua == null) {
             return pack.getInsertText();
         }
@@ -693,7 +689,7 @@ public class EmoteClientHandler {
         sessionPuasByChecksum.put(checksum, leasedPua);
         sessionPuasByPackKey.put(pack.getNamespaced(), leasedPua);
         ClientEmojiHandler.EMOJI_PUA_LOOKUP.put(leasedPua, pack);
-        return String.valueOf(leasedPua);
+        return leasedPua;
     }
 
     private static EmojiFromPack findPackEmoji(String name, String namespace) {

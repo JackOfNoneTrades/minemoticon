@@ -4,6 +4,7 @@ import net.minecraft.client.gui.GuiTextField;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
+import org.fentanylsolutions.minemoticon.text.EmojiPua;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -106,6 +107,13 @@ public abstract class MixinGuiTextField {
     private int findEmojiStart(String text, int pos) {
         if (pos <= 0 || pos > text.length()) return -1;
 
+        if (pos >= EmojiPua.TOKEN_LENGTH) {
+            String puaToken = EmojiPua.tokenAt(text, pos - EmojiPua.TOKEN_LENGTH);
+            if (puaToken != null) {
+                return pos - EmojiPua.TOKEN_LENGTH;
+            }
+        }
+
         // Prefer the longest emoji ending at pos so we do not stop on trailing components
         // inside a larger ZWJ ligature.
         for (int len = Math.min(MINEMOTICON$MAX_EMOJI_SEQUENCE_LENGTH, pos); len >= 2; len--) {
@@ -142,6 +150,11 @@ public abstract class MixinGuiTextField {
     // Find the end of a Unicode emoji sequence starting at pos
     private int findEmojiEnd(String text, int pos) {
         if (pos < 0 || pos >= text.length()) return pos;
+
+        String puaToken = EmojiPua.tokenAt(text, pos);
+        if (puaToken != null) {
+            return pos + EmojiPua.TOKEN_LENGTH;
+        }
 
         var keys = ClientEmojiHandler.UNICODE_KEYS_BY_CHAR.get(text.charAt(pos));
         if (keys != null) {
@@ -188,6 +201,19 @@ public abstract class MixinGuiTextField {
 
     private int[] findContainingEmojiBounds(String text, int pos) {
         if (pos <= 0 || pos >= text.length()) return null;
+
+        int puaStart = pos - 1;
+        if (puaStart >= 0) {
+            String leftToken = EmojiPua.tokenAt(text, puaStart);
+            if (leftToken != null && pos > puaStart && pos < puaStart + EmojiPua.TOKEN_LENGTH) {
+                return new int[] { puaStart, puaStart + EmojiPua.TOKEN_LENGTH };
+            }
+        }
+
+        String currentToken = EmojiPua.tokenAt(text, pos);
+        if (currentToken != null) {
+            return new int[] { pos, pos + EmojiPua.TOKEN_LENGTH };
+        }
 
         int scanStart = Math.max(0, pos - MINEMOTICON$MAX_EMOJI_SEQUENCE_LENGTH);
         int bestStart = -1;

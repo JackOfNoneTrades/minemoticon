@@ -63,17 +63,17 @@ public class EmoteServerHandler {
         final String namespace;
         final String checksum;
         final String senderName;
-        final char pua;
+        final String pua;
         final int totalChunks;
         final byte[][] chunks;
         int received;
 
-        PendingUpload(String name, String namespace, String checksum, String senderName, char pua, int totalChunks) {
+        PendingUpload(String name, String namespace, String checksum, String senderName, String pua, int totalChunks) {
             this.name = name;
             this.namespace = namespace != null ? namespace : "";
             this.checksum = checksum;
             this.senderName = senderName;
-            this.pua = pua;
+            this.pua = pua != null ? pua : "";
             this.totalChunks = totalChunks;
             this.chunks = new byte[totalChunks][];
         }
@@ -105,38 +105,38 @@ public class EmoteServerHandler {
     private static final Map<String, CachedEmote> emoteCache = new ConcurrentHashMap<>();
     private static final Map<String, PendingUpload> pendingUploads = new ConcurrentHashMap<>();
     private static final Map<String, PlayerDownloadQueue> downloadQueues = new ConcurrentHashMap<>();
-    private static final Map<String, ArrayDeque<Character>> availablePuasByOwner = new ConcurrentHashMap<>();
-    private static final Map<String, Set<Character>> leasedPuasByOwner = new ConcurrentHashMap<>();
-    private static final Map<Character, String> leasedPuaOwners = new ConcurrentHashMap<>();
+    private static final Map<String, ArrayDeque<String>> availablePuasByOwner = new ConcurrentHashMap<>();
+    private static final Map<String, Set<String>> leasedPuasByOwner = new ConcurrentHashMap<>();
+    private static final Map<String, String> leasedPuaOwners = new ConcurrentHashMap<>();
 
     public static void bootstrapPersistentStore() {
         PersistentEmoteStore.bootstrap();
         Minemoticon.LOG.info("Loaded {} persistent client emoji aliases", PersistentEmoteStore.getAliasCount());
     }
 
-    public static void onPuaRegisterRequest(EntityPlayerMP player, char pua, String name, String namespace,
+    public static void onPuaRegisterRequest(EntityPlayerMP player, String pua, String name, String namespace,
         String checksum) {
         if (!ServerConfig.allowClientEmotes) {
             NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(name, "Custom emotes disabled", String.valueOf(pua)), player);
+                .sendTo(new PacketEmoteReject(name, "Custom emotes disabled", pua), player);
             return;
         }
 
-        if (!EmojiPua.isPua(pua)) {
+        if (!EmojiPua.isPuaToken(pua)) {
             NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Invalid emoji reference"), player);
             return;
         }
 
         if (!isValidName(name) || (namespace != null && !namespace.isEmpty() && !isValidName(namespace))) {
             NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(name, "Invalid emote name", String.valueOf(pua)), player);
+                .sendTo(new PacketEmoteReject(name, "Invalid emote name", pua), player);
             return;
         }
 
         String sender = player.getCommandSenderName();
         if (!consumeLeasedPua(sender, pua)) {
             NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(name, "Emoji reference is not available", String.valueOf(pua)), player);
+                .sendTo(new PacketEmoteReject(name, "Emoji reference is not available", pua), player);
             return;
         }
 
@@ -149,7 +149,7 @@ public class EmoteServerHandler {
             if (claim == null) {
                 restoreConsumedPua(sender, pua);
                 NetworkHandler.INSTANCE
-                    .sendTo(new PacketEmoteReject(name, "Unknown emote asset", String.valueOf(pua)), player);
+                    .sendTo(new PacketEmoteReject(name, "Unknown emote asset", pua), player);
                 return;
             }
             if (claim.quotaExceeded) {
@@ -158,7 +158,7 @@ public class EmoteServerHandler {
                     new PacketEmoteReject(
                         name,
                         quotaMessage(claim.usedBytes, claim.quotaBytes, claim.usedCount, claim.quotaCount),
-                        String.valueOf(pua)),
+                        pua),
                     player);
                 return;
             }
@@ -166,22 +166,22 @@ public class EmoteServerHandler {
             finalizeConsumedPua(sender, pua);
             refillPuas(player);
             PersistentEmoteStore.BroadcastAlias alias = PersistentEmoteStore.getAliasForOwnerChecksum(sender, checksum);
-            broadcastAlias(name, namespace, checksum, sender, null, alias != null ? alias.pua : String.valueOf(pua));
+            broadcastAlias(name, namespace, checksum, sender, null, alias != null ? alias.pua : pua);
             return;
         }
 
         NetworkHandler.INSTANCE
-            .sendTo(new PacketEmoteUploadRequest(name, namespace, checksum, String.valueOf(pua)), player);
+            .sendTo(new PacketEmoteUploadRequest(name, namespace, checksum, pua), player);
     }
 
-    public static void onPuaResolveRequest(EntityPlayerMP player, char pua) {
-        if (!EmojiPua.isPua(pua)) {
+    public static void onPuaResolveRequest(EntityPlayerMP player, String pua) {
+        if (!EmojiPua.isPuaToken(pua)) {
             return;
         }
 
         PersistentEmoteStore.BroadcastAlias alias = PersistentEmoteStore.getAliasForPua(pua);
         if (alias == null) {
-            NetworkHandler.INSTANCE.sendTo(new PacketPuaResolveResponse(String.valueOf(pua)), player);
+            NetworkHandler.INSTANCE.sendTo(new PacketPuaResolveResponse(pua), player);
             return;
         }
 
@@ -193,7 +193,7 @@ public class EmoteServerHandler {
     public static void onEmoteDataUpload(EntityPlayerMP player, String name, String namespace, String checksum,
         String pua, int chunkIndex, int totalChunks, byte[] data) {
         if (!ServerConfig.allowClientEmotes) return;
-        if (pua == null || pua.length() != 1 || !EmojiPua.isPua(pua.charAt(0))) {
+        if (!EmojiPua.isPuaToken(pua)) {
             return;
         }
 
@@ -205,7 +205,7 @@ public class EmoteServerHandler {
                 namespace,
                 checksum,
                 player.getCommandSenderName(),
-                pua.charAt(0),
+                pua,
                 totalChunks));
 
         if (chunkIndex < 0 || chunkIndex >= pending.totalChunks) return;
@@ -251,7 +251,7 @@ public class EmoteServerHandler {
     public static void onPlayerDisconnect(EntityPlayerMP player) {
         String owner = player.getCommandSenderName();
         String prefix = owner + ":";
-        List<Character> orphanedPuas = new ArrayList<>();
+        List<String> orphanedPuas = new ArrayList<>();
         for (PendingUpload pending : pendingUploads.values()) {
             if (owner.equals(pending.senderName)) {
                 orphanedPuas.add(pending.pua);
@@ -261,11 +261,11 @@ public class EmoteServerHandler {
             .removeIf(key -> key.startsWith(prefix));
         downloadQueues.remove(player.getCommandSenderName());
         availablePuasByOwner.remove(owner);
-        Set<Character> leased = leasedPuasByOwner.remove(owner);
+        Set<String> leased = leasedPuasByOwner.remove(owner);
         if (leased != null) {
             orphanedPuas.addAll(leased);
         }
-        for (char pua : orphanedPuas) {
+        for (String pua : orphanedPuas) {
             leasedPuaOwners.remove(pua);
         }
     }
@@ -339,7 +339,7 @@ public class EmoteServerHandler {
                 new PacketEmoteReject(
                     pending.name,
                     "Emote too large (" + totalSize + " > " + maxClientEmoteSize + ")",
-                    String.valueOf(pending.pua)),
+                    pending.pua),
                 player);
             return;
         }
@@ -355,7 +355,7 @@ public class EmoteServerHandler {
         if (sanitized == null) {
             restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(pending.name, "Invalid image data", String.valueOf(pending.pua)), player);
+                .sendTo(new PacketEmoteReject(pending.name, "Invalid image data", pending.pua), player);
             return;
         }
 
@@ -365,7 +365,7 @@ public class EmoteServerHandler {
                 new PacketEmoteReject(
                     pending.name,
                     "Emote too large after sanitizing (" + sanitized.length + " > " + maxClientEmoteSize + ")",
-                    String.valueOf(pending.pua)),
+                    pending.pua),
                 player);
             return;
         }
@@ -374,7 +374,7 @@ public class EmoteServerHandler {
         if (pending.checksum != null && !pending.checksum.isEmpty() && !pending.checksum.equals(checksum)) {
             restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(pending.name, "Checksum mismatch", String.valueOf(pending.pua)), player);
+                .sendTo(new PacketEmoteReject(pending.name, "Checksum mismatch", pending.pua), player);
             return;
         }
 
@@ -394,7 +394,7 @@ public class EmoteServerHandler {
                     new PacketEmoteReject(
                         pending.name,
                         quotaMessage(result.usedBytes, result.quotaBytes, result.usedCount, result.quotaCount),
-                        String.valueOf(pending.pua)),
+                        pending.pua),
                     player);
                 return;
             }
@@ -402,7 +402,7 @@ public class EmoteServerHandler {
             Minemoticon.LOG.error("Failed to persist uploaded emote {}", pending.name, e);
             restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE.sendTo(
-                new PacketEmoteReject(pending.name, "Failed to persist emote", String.valueOf(pending.pua)),
+                new PacketEmoteReject(pending.name, "Failed to persist emote", pending.pua),
                 player);
             return;
         }
@@ -419,7 +419,7 @@ public class EmoteServerHandler {
             checksum,
             pending.senderName,
             null,
-            alias != null ? alias.pua : String.valueOf(pending.pua));
+            alias != null ? alias.pua : pending.pua);
     }
 
     private static byte[] sanitize(byte[] raw, String sourceName, boolean enforceMaxDimension) {
@@ -722,17 +722,13 @@ public class EmoteServerHandler {
         }
     }
 
-    private static char allocateLeasedPua() {
-        boolean[] used = new boolean[EmojiPua.COUNT];
-        for (char pua : PersistentEmoteStore.getAssignedPuas()) {
-            used[EmojiPua.toIndex(pua)] = true;
-        }
-        for (char pua : leasedPuaOwners.keySet()) {
-            used[EmojiPua.toIndex(pua)] = true;
-        }
-        for (int i = 0; i < used.length; i++) {
-            if (!used[i]) {
-                return EmojiPua.fromIndex(i);
+    private static String allocateLeasedPua() {
+        Set<String> used = new HashSet<>(PersistentEmoteStore.getAssignedPuas());
+        used.addAll(leasedPuaOwners.keySet());
+        for (int i = 0; i < EmojiPua.TOKEN_COUNT; i++) {
+            String token = EmojiPua.fromTokenIndex(i);
+            if (!used.contains(token)) {
+                return token;
             }
         }
         throw new IllegalStateException("Ran out of private-use emoji references");
@@ -744,38 +740,38 @@ public class EmoteServerHandler {
         }
 
         String owner = player.getCommandSenderName();
-        ArrayDeque<Character> available = availablePuasByOwner.computeIfAbsent(owner, ignored -> new ArrayDeque<>());
-        Set<Character> leased = leasedPuasByOwner
+        ArrayDeque<String> available = availablePuasByOwner.computeIfAbsent(owner, ignored -> new ArrayDeque<>());
+        Set<String> leased = leasedPuasByOwner
             .computeIfAbsent(owner, ignored -> Collections.newSetFromMap(new ConcurrentHashMap<>()));
-        StringBuilder granted = new StringBuilder();
+        List<String> granted = new ArrayList<>();
 
         while (available.size() < TARGET_FREE_PUAS_PER_PLAYER) {
-            char pua = allocateLeasedPua();
+            String pua = allocateLeasedPua();
             available.addLast(pua);
             leased.add(pua);
             leasedPuaOwners.put(pua, owner);
-            granted.append(pua);
+            granted.add(pua);
         }
 
-        if (granted.length() > 0) {
-            NetworkHandler.INSTANCE.sendTo(new PacketPuaLeaseGrant(granted.toString()), player);
+        if (!granted.isEmpty()) {
+            NetworkHandler.INSTANCE.sendTo(new PacketPuaLeaseGrant(EmojiPua.encodeLeasePayload(granted)), player);
         }
     }
 
-    private static boolean consumeLeasedPua(String owner, char pua) {
-        ArrayDeque<Character> available = availablePuasByOwner.get(owner);
+    private static boolean consumeLeasedPua(String owner, String pua) {
+        ArrayDeque<String> available = availablePuasByOwner.get(owner);
         if (available == null || !available.remove(pua)) {
             return false;
         }
         return leasedPuaOwners.containsKey(pua) && owner.equals(leasedPuaOwners.get(pua));
     }
 
-    private static void restoreConsumedPua(String owner, char pua) {
-        if (!EmojiPua.isPua(pua) || owner == null || !owner.equals(leasedPuaOwners.get(pua))) {
+    private static void restoreConsumedPua(String owner, String pua) {
+        if (!EmojiPua.isPuaToken(pua) || owner == null || !owner.equals(leasedPuaOwners.get(pua))) {
             return;
         }
 
-        ArrayDeque<Character> available = availablePuasByOwner.computeIfAbsent(owner, ignored -> new ArrayDeque<>());
+        ArrayDeque<String> available = availablePuasByOwner.computeIfAbsent(owner, ignored -> new ArrayDeque<>());
         if (!available.contains(pua)) {
             available.addFirst(pua);
         }
@@ -783,12 +779,12 @@ public class EmoteServerHandler {
             .add(pua);
     }
 
-    private static void finalizeConsumedPua(String owner, char pua) {
-        ArrayDeque<Character> available = availablePuasByOwner.get(owner);
+    private static void finalizeConsumedPua(String owner, String pua) {
+        ArrayDeque<String> available = availablePuasByOwner.get(owner);
         if (available != null) {
             available.remove(pua);
         }
-        Set<Character> leased = leasedPuasByOwner.get(owner);
+        Set<String> leased = leasedPuasByOwner.get(owner);
         if (leased != null) {
             leased.remove(pua);
             if (leased.isEmpty()) {

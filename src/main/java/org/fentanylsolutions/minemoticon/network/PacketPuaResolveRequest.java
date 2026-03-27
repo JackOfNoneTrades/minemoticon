@@ -6,6 +6,8 @@ import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
 import cpw.mods.fml.common.network.simpleimpl.MessageContext;
 import io.netty.buffer.ByteBuf;
 
+import org.fentanylsolutions.minemoticon.text.EmojiPua;
+
 public class PacketPuaResolveRequest implements IMessage {
 
     public String pua;
@@ -30,8 +32,8 @@ public class PacketPuaResolveRequest implements IMessage {
 
         @Override
         public IMessage onMessage(PacketPuaResolveRequest message, MessageContext ctx) {
-            if (message.pua != null && message.pua.length() == 1) {
-                EmoteServerHandler.onPuaResolveRequest(ctx.getServerHandler().playerEntity, message.pua.charAt(0));
+            if (EmojiPua.isPuaToken(message.pua)) {
+                EmoteServerHandler.onPuaResolveRequest(ctx.getServerHandler().playerEntity, message.pua);
             }
             return null;
         }

@@ -86,7 +86,7 @@ public final class PersistentEmoteStore {
     }
 
     public static synchronized StoreResult store(String owner, String name, String namespace, String checksum,
-        byte[] sanitizedPayload, String extension, char preferredPua) throws IOException {
+        byte[] sanitizedPayload, String extension, String preferredPua) throws IOException {
         StoreData data = getData();
         if (data == null) {
             throw new IOException("World save is not available");
@@ -124,7 +124,7 @@ public final class PersistentEmoteStore {
     }
 
     public static synchronized StoreResult claimExisting(String owner, String name, String namespace, String checksum,
-        char preferredPua) {
+        String preferredPua) {
         StoreData data = getData();
         if (data == null) {
             return StoreResult.quotaExceeded(0, 0, 0, 0);
@@ -244,7 +244,7 @@ public final class PersistentEmoteStore {
         return data.getAllAliases();
     }
 
-    public static synchronized Set<Character> getAssignedPuas() {
+    public static synchronized Set<String> getAssignedPuas() {
         StoreData data = getData();
         if (data == null) {
             return Collections.emptySet();
@@ -252,9 +252,9 @@ public final class PersistentEmoteStore {
         return data.getAssignedPuas();
     }
 
-    public static synchronized BroadcastAlias getAliasForPua(char pua) {
+    public static synchronized BroadcastAlias getAliasForPua(String pua) {
         StoreData data = getData();
-        if (data == null || !EmojiPua.isPua(pua)) {
+        if (data == null || !EmojiPua.isPuaToken(pua)) {
             return null;
         }
         return data.getAliasForPua(pua);
@@ -332,13 +332,13 @@ public final class PersistentEmoteStore {
         public final String checksum;
         public final String extension;
         public final int sizeBytes;
-        public final char pua;
+        public final String pua;
 
-        public AssetMeta(String checksum, String extension, int sizeBytes, char pua) {
+        public AssetMeta(String checksum, String extension, int sizeBytes, String pua) {
             this.checksum = checksum;
             this.extension = extension != null ? extension : ".png";
             this.sizeBytes = sizeBytes;
-            this.pua = pua;
+            this.pua = pua != null ? pua : "";
         }
 
         private AssetMeta copy() {
@@ -463,7 +463,7 @@ public final class PersistentEmoteStore {
                         checksum,
                         entry.getString("Extension"),
                         entry.getInteger("SizeBytes"),
-                        (char) entry.getInteger("Pua")));
+                        entry.getString("Pua")));
             }
 
             NBTTagList ownerList = compound.getTagList("Owners", 10);
@@ -483,10 +483,10 @@ public final class PersistentEmoteStore {
                         continue;
                     }
 
-                    char aliasPua = (char) aliasTag.getInteger("Pua");
-                    if (!EmojiPua.isPua(aliasPua)) {
+                    String aliasPua = aliasTag.getString("Pua");
+                    if (!EmojiPua.isPuaToken(aliasPua)) {
                         AssetMeta asset = assets.get(checksum);
-                        aliasPua = asset != null ? asset.pua : '\0';
+                        aliasPua = asset != null ? asset.pua : "";
                     }
 
                     aliases.put(
@@ -512,7 +512,7 @@ public final class PersistentEmoteStore {
                 entry.setString("Checksum", asset.checksum);
                 entry.setString("Extension", asset.extension);
                 entry.setInteger("SizeBytes", asset.sizeBytes);
-                entry.setInteger("Pua", asset.pua);
+                entry.setString("Pua", asset.pua);
                 assetList.appendTag(entry);
             }
             compound.setTag("Assets", assetList);
@@ -534,7 +534,7 @@ public final class PersistentEmoteStore {
                     aliasTag.setString("Checksum", alias.checksum);
                     aliasTag.setString("Name", alias.name);
                     aliasTag.setString("Namespace", alias.namespace);
-                    aliasTag.setInteger("Pua", alias.pua);
+                    aliasTag.setString("Pua", alias.pua);
                     entryList.appendTag(aliasTag);
                 }
                 ownerTag.setTag("Entries", entryList);
@@ -569,12 +569,12 @@ public final class PersistentEmoteStore {
             return aliases == null ? 0 : aliases.size();
         }
 
-        private void putOwnerEmoji(String owner, String checksum, String name, String namespace, char preferredPua) {
+        private void putOwnerEmoji(String owner, String checksum, String name, String namespace, String preferredPua) {
             LinkedHashMap<String, OwnerAlias> aliases = owners.computeIfAbsent(owner, ignored -> new LinkedHashMap<>());
             OwnerAlias existingAlias = aliases.get(checksum);
             AssetMeta asset = assets.get(checksum);
-            char aliasPua = normalizeOwnerPua(
-                existingAlias != null ? existingAlias.pua : (asset != null ? asset.pua : '\0'),
+            String aliasPua = normalizeOwnerPua(
+                existingAlias != null ? existingAlias.pua : (asset != null ? asset.pua : ""),
                 preferredPua,
                 owner,
                 checksum);
@@ -683,9 +683,7 @@ public final class PersistentEmoteStore {
                             alias.name,
                             alias.namespace,
                             alias.checksum,
-                            EmojiPua.isPua(resolveAliasPua(alias, asset))
-                                ? EmojiPua.toString(resolveAliasPua(alias, asset))
-                                : ""));
+                            EmojiPua.isPuaToken(resolveAliasPua(alias, asset)) ? resolveAliasPua(alias, asset) : ""));
                 }
             }
             aliases.sort(
@@ -741,8 +739,8 @@ public final class PersistentEmoteStore {
                 for (Map.Entry<String, OwnerAlias> aliasEntry : new ArrayList<>(aliases.entrySet())) {
                     OwnerAlias alias = aliasEntry.getValue();
                     AssetMeta asset = assets.get(alias.checksum);
-                    char fallback = asset != null ? asset.pua : '\0';
-                    if (EmojiPua.isPua(alias.pua)) {
+                    String fallback = asset != null ? asset.pua : "";
+                    if (EmojiPua.isPuaToken(alias.pua)) {
                         continue;
                     }
                     aliasEntry.setValue(
@@ -750,18 +748,18 @@ public final class PersistentEmoteStore {
                             alias.checksum,
                             alias.name,
                             alias.namespace,
-                            normalizeOwnerPua(fallback, '\0', ownerEntry.getKey(), alias.checksum)));
+                            normalizeOwnerPua(fallback, "", ownerEntry.getKey(), alias.checksum)));
                     changed = true;
                 }
             }
 
             for (Map.Entry<String, AssetMeta> entry : new ArrayList<>(assets.entrySet())) {
                 AssetMeta asset = entry.getValue();
-                if (EmojiPua.isPua(asset.pua)) {
+                if (EmojiPua.isPuaToken(asset.pua)) {
                     continue;
                 }
-                char fallback = findAnyAliasPua(asset.checksum);
-                if (!EmojiPua.isPua(fallback)) {
+                String fallback = findAnyAliasPua(asset.checksum);
+                if (!EmojiPua.isPuaToken(fallback)) {
                     fallback = allocateNextPua();
                 }
                 entry.setValue(new AssetMeta(asset.checksum, asset.extension, asset.sizeBytes, fallback));
@@ -770,18 +768,18 @@ public final class PersistentEmoteStore {
             return changed;
         }
 
-        private Set<Character> getAssignedPuas() {
-            Set<Character> assigned = new LinkedHashSet<>();
+        private Set<String> getAssignedPuas() {
+            Set<String> assigned = new LinkedHashSet<>();
             for (LinkedHashMap<String, OwnerAlias> aliases : owners.values()) {
                 for (OwnerAlias alias : aliases.values()) {
-                    if (EmojiPua.isPua(alias.pua)) {
+                    if (EmojiPua.isPuaToken(alias.pua)) {
                         assigned.add(alias.pua);
                     }
                 }
             }
             if (assigned.isEmpty()) {
                 for (AssetMeta asset : assets.values()) {
-                    if (EmojiPua.isPua(asset.pua)) {
+                    if (EmojiPua.isPuaToken(asset.pua)) {
                         assigned.add(asset.pua);
                     }
                 }
@@ -789,14 +787,12 @@ public final class PersistentEmoteStore {
             return assigned;
         }
 
-        private char allocateNextPua() {
-            boolean[] used = new boolean[EmojiPua.COUNT];
-            for (char pua : getAssignedPuas()) {
-                used[EmojiPua.toIndex(pua)] = true;
-            }
-            for (int i = 0; i < used.length; i++) {
-                if (!used[i]) {
-                    return EmojiPua.fromIndex(i);
+        private String allocateNextPua() {
+            Set<String> used = getAssignedPuas();
+            for (int i = 0; i < EmojiPua.TOKEN_COUNT; i++) {
+                String token = EmojiPua.fromTokenIndex(i);
+                if (!used.contains(token)) {
+                    return token;
                 }
             }
             throw new IllegalStateException("Ran out of private-use emoji references");
@@ -857,8 +853,8 @@ public final class PersistentEmoteStore {
                 for (OwnerAlias alias : aliases.values()) {
                     if (token.equals(alias.namespace + "/" + alias.name)) {
                         AssetMeta asset = assets.get(alias.checksum);
-                        char pua = resolveAliasPua(alias, asset);
-                        return EmojiPua.isPua(pua) ? EmojiPua.toString(pua) : null;
+                        String pua = resolveAliasPua(alias, asset);
+                        return EmojiPua.isPuaToken(pua) ? pua : null;
                     }
                 }
                 return null;
@@ -880,23 +876,23 @@ public final class PersistentEmoteStore {
             }
 
             AssetMeta asset = assets.get(match.checksum);
-            char pua = resolveAliasPua(match, asset);
-            return EmojiPua.isPua(pua) ? EmojiPua.toString(pua) : null;
+            String pua = resolveAliasPua(match, asset);
+            return EmojiPua.isPuaToken(pua) ? pua : null;
         }
 
-        private BroadcastAlias getAliasForPua(char pua) {
+        private BroadcastAlias getAliasForPua(String pua) {
             for (Map.Entry<String, LinkedHashMap<String, OwnerAlias>> ownerEntry : owners.entrySet()) {
                 for (OwnerAlias alias : ownerEntry.getValue()
                     .values()) {
                     AssetMeta asset = assets.get(alias.checksum);
-                    char aliasPua = resolveAliasPua(alias, asset);
-                    if (aliasPua == pua) {
+                    String aliasPua = resolveAliasPua(alias, asset);
+                    if (aliasPua.equals(pua)) {
                         return new BroadcastAlias(
                             ownerEntry.getKey(),
                             alias.name,
                             alias.namespace,
                             alias.checksum,
-                            EmojiPua.toString(aliasPua));
+                            aliasPua);
                     }
                 }
             }
@@ -913,30 +909,30 @@ public final class PersistentEmoteStore {
                 return null;
             }
             AssetMeta asset = assets.get(checksum);
-            char aliasPua = resolveAliasPua(alias, asset);
+            String aliasPua = resolveAliasPua(alias, asset);
             return new BroadcastAlias(
                 owner,
                 alias.name,
                 alias.namespace,
                 alias.checksum,
-                EmojiPua.isPua(aliasPua) ? EmojiPua.toString(aliasPua) : "");
+                EmojiPua.isPuaToken(aliasPua) ? aliasPua : "");
         }
 
-        private char normalizeOwnerPua(char fallbackPua, char preferredPua, String owner, String checksum) {
-            if (EmojiPua.isPua(fallbackPua) && isPuaAvailableForOwner(fallbackPua, owner, checksum)) {
+        private String normalizeOwnerPua(String fallbackPua, String preferredPua, String owner, String checksum) {
+            if (EmojiPua.isPuaToken(fallbackPua) && isPuaAvailableForOwner(fallbackPua, owner, checksum)) {
                 return fallbackPua;
             }
-            if (EmojiPua.isPua(preferredPua) && isPuaAvailableForOwner(preferredPua, owner, checksum)) {
+            if (EmojiPua.isPuaToken(preferredPua) && isPuaAvailableForOwner(preferredPua, owner, checksum)) {
                 return preferredPua;
             }
             return allocateNextPua();
         }
 
-        private boolean isPuaAvailableForOwner(char pua, String owner, String checksum) {
+        private boolean isPuaAvailableForOwner(String pua, String owner, String checksum) {
             for (Map.Entry<String, LinkedHashMap<String, OwnerAlias>> ownerEntry : owners.entrySet()) {
                 for (OwnerAlias alias : ownerEntry.getValue()
                     .values()) {
-                    if (alias.pua != pua) {
+                    if (!alias.pua.equals(pua)) {
                         continue;
                     }
                     if (ownerEntry.getKey()
@@ -949,21 +945,21 @@ public final class PersistentEmoteStore {
             return true;
         }
 
-        private char resolveAliasPua(OwnerAlias alias, AssetMeta asset) {
-            if (alias != null && EmojiPua.isPua(alias.pua)) {
+        private String resolveAliasPua(OwnerAlias alias, AssetMeta asset) {
+            if (alias != null && EmojiPua.isPuaToken(alias.pua)) {
                 return alias.pua;
             }
-            return asset != null ? asset.pua : '\0';
+            return asset != null ? asset.pua : "";
         }
 
-        private char findAnyAliasPua(String checksum) {
+        private String findAnyAliasPua(String checksum) {
             for (LinkedHashMap<String, OwnerAlias> aliases : owners.values()) {
                 OwnerAlias alias = aliases.get(checksum);
-                if (alias != null && EmojiPua.isPua(alias.pua)) {
+                if (alias != null && EmojiPua.isPuaToken(alias.pua)) {
                     return alias.pua;
                 }
             }
-            return '\0';
+            return "";
         }
     }
 
@@ -972,13 +968,13 @@ public final class PersistentEmoteStore {
         private final String checksum;
         private final String name;
         private final String namespace;
-        private final char pua;
+        private final String pua;
 
-        private OwnerAlias(String checksum, String name, String namespace, char pua) {
+        private OwnerAlias(String checksum, String name, String namespace, String pua) {
             this.checksum = checksum;
             this.name = name != null ? name : "";
             this.namespace = namespace != null ? namespace : "";
-            this.pua = pua;
+            this.pua = pua != null ? pua : "";
         }
     }
 }

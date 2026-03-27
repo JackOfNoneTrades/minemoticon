@@ -81,33 +81,27 @@ public class EmojiRenderer {
                 continue;
             }
 
-            RenderableEmoji puaMatch = null;
             char current = text.charAt(i);
-            if (EmojiPua.isPua(current)) {
+            String puaToken = EmojiPua.tokenAt(text, i);
+            if (puaToken != null) {
                 sawPua = true;
-                EmoteClientHandler.onPuaObserved(current);
-            }
-            Emoji puaEmoji = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(current);
-            if (puaEmoji instanceof RenderableEmoji renderableEmoji) {
-                puaMatch = renderableEmoji;
-            }
-            if (puaMatch != null) {
-                if (detailedSegments == null) detailedSegments = new ArrayList<>();
-                if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
-                detailedSegments.add(ParsedSegment.emoji(text.substring(i, i + 1), puaMatch));
-                lastEnd = i + 1;
-                i = lastEnd;
-                continue;
-            }
-            if (EmojiPua.isPua(current)) {
+                EmoteClientHandler.onPuaObserved(puaToken);
+                Emoji puaEmoji = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(puaToken);
+                if (puaEmoji instanceof RenderableEmoji renderableEmoji) {
+                    if (detailedSegments == null) detailedSegments = new ArrayList<>();
+                    if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
+                    detailedSegments.add(ParsedSegment.emoji(puaToken, renderableEmoji));
+                    lastEnd = i + EmojiPua.TOKEN_LENGTH;
+                    i = lastEnd;
+                    continue;
+                }
                 if (detailedSegments == null) detailedSegments = new ArrayList<>();
                 if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
                 detailedSegments.add(ParsedSegment.text("\u25A0"));
-                lastEnd = i + 1;
+                lastEnd = i + EmojiPua.TOKEN_LENGTH;
                 i = lastEnd;
                 continue;
             }
-
             // Try :colon: syntax
             if (current == ':') {
                 int end = text.indexOf(':', i + 1);
@@ -170,14 +164,14 @@ public class EmojiRenderer {
 
         int escapedIndex = index + 1;
         char escapedChar = text.charAt(escapedIndex);
-        if (EmojiPua.isPua(escapedChar)) {
-            Emoji emoji = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(escapedChar);
+        String escapedPuaToken = EmojiPua.tokenAt(text, escapedIndex);
+        if (escapedPuaToken != null) {
+            Emoji emoji = ClientEmojiHandler.EMOJI_PUA_LOOKUP.get(escapedPuaToken);
             if (emoji instanceof RenderableEmoji renderableEmoji) {
-                return new EscapeMatch(getEscapedLiteralText(renderableEmoji), escapedIndex + 1);
+                return new EscapeMatch(getEscapedLiteralText(renderableEmoji), escapedIndex + EmojiPua.TOKEN_LENGTH);
             }
-            return new EscapeMatch("\u25A0", escapedIndex + 1);
+            return new EscapeMatch("\u25A0", escapedIndex + EmojiPua.TOKEN_LENGTH);
         }
-
         if (escapedChar == ':') {
             int end = text.indexOf(':', escapedIndex + 1);
             if (end != -1) {
