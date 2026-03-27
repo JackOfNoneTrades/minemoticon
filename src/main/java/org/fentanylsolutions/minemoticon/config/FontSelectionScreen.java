@@ -1,9 +1,19 @@
 package org.fentanylsolutions.minemoticon.config;
 
+import java.awt.Font;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Shape;
+import java.awt.font.FontRenderContext;
+import java.awt.font.GlyphVector;
+import java.awt.font.LineMetrics;
+import java.awt.geom.AffineTransform;
+import java.awt.geom.Rectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -35,7 +45,12 @@ import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.api.DownloadedTexture;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
+import org.fentanylsolutions.minemoticon.colorfont.VariationAxis;
+import org.fentanylsolutions.minemoticon.font.CustomFontSource;
 import org.fentanylsolutions.minemoticon.font.FontSource;
+import org.fentanylsolutions.minemoticon.font.FontStack;
+import org.fentanylsolutions.minemoticon.font.FontVariationConfig;
+import org.fentanylsolutions.minemoticon.font.GlyphCache;
 import org.fentanylsolutions.minemoticon.font.MinecraftFontSource;
 import org.fentanylsolutions.minemoticon.render.EmojiTextureUtil;
 import org.lwjgl.input.Mouse;
@@ -69,6 +84,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private static final int PREVIEW_DISPLAY_SIZE = 12;
     private static final int MAX_PREVIEW_CACHE_ENTRIES = 24;
     private static final long MAX_PREVIEW_CACHE_BYTES = 6L * 1024 * 1024;
+    private static final String SETTINGS_GEAR = "\u2699";
 
     private static final class CachedPreviewStrip {
 
@@ -97,6 +113,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private final GuiScreen parent;
     private final Map<String, PreviewTexture> previews = new HashMap<>();
     private final List<String> droppedFilePaths = new ArrayList<>();
+    private final Map<String, Map<String, Float>> fontVariationOverrides = new LinkedHashMap<>();
 
     // Two-column model
     private final List<FontEntry> availableEntries = new ArrayList<>();
@@ -128,6 +145,15 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         this.parent = parent;
     }
 
+    public void openFirstSettingsPopupForDevCapture() {
+        for (FontEntry entry : enabledEntries) {
+            if (entry.hasSettingsButton()) {
+                mc.displayGuiScreen(new FontSettingsScreen(this, entry));
+                return;
+            }
+        }
+    }
+
     @Override
     public void initGui() {
         buttonList.clear();
@@ -156,6 +182,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         WindowDropTarget.register();
         WindowDropTarget.addListener(this);
 
+        fontVariationOverrides.clear();
+        fontVariationOverrides.putAll(FontVariationConfig.parse(EmojiConfig.fontVariationSettings));
         rebuildLists();
     }
 
@@ -275,6 +303,10 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
                 mouseX,
                 mouseY);
             if (entry != null) {
+                if (entry.isInsideSettingsButton(mouseX, mouseY)) {
+                    mc.displayGuiScreen(new FontSettingsScreen(this, entry));
+                    return;
+                }
                 if (entry.isInsideUpButton(mouseX, mouseY)) {
                     moveUp(entry);
                     return;
@@ -424,26 +456,37 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         }
         availableEntries.remove(entry);
         enabledEntries.remove(entry);
+        fontVariationOverrides.remove(entry.source.getId());
+        invalidatePreview(entry.source.getId());
         dirty = true;
         refreshMetrics();
         showStatus("Removed " + entry.source.getDisplayName(), 0xFF80FF80);
     }
 
     private void applyAndClose() {
-        if (dirty) {
-            String[] ids = new String[enabledEntries.size()];
-            for (int i = 0; i < enabledEntries.size(); i++) {
-                ids[i] = enabledEntries.get(i).source.getId();
-            }
-            EmojiConfig.fontStack = ids;
-            try {
-                com.gtnewhorizon.gtnhlib.config.ConfigurationManager.save(EmojiConfig.class);
-            } catch (Exception e) {
-                Minemoticon.LOG.warn("Failed to save font stack config", e);
-            }
-            ClientEmojiHandler.reloadFontStack();
-        }
+        persistChanges();
         mc.displayGuiScreen(parent);
+    }
+
+    private void persistChanges() {
+        if (!dirty) {
+            return;
+        }
+
+        String[] ids = new String[enabledEntries.size()];
+        for (int i = 0; i < enabledEntries.size(); i++) {
+            ids[i] = enabledEntries.get(i).source.getId();
+        }
+        EmojiConfig.fontStack = ids;
+        pruneVariationOverrides();
+        EmojiConfig.fontVariationSettings = FontVariationConfig.encode(fontVariationOverrides);
+        try {
+            com.gtnewhorizon.gtnhlib.config.ConfigurationManager.save(EmojiConfig.class);
+        } catch (Exception e) {
+            Minemoticon.LOG.warn("Failed to save font stack config", e);
+        }
+        ClientEmojiHandler.reloadFontStack();
+        dirty = false;
     }
 
     private void refreshMetrics() {
@@ -637,6 +680,16 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private void requestPreviewLoad(FontSource source, PreviewTexture preview) {
         if (!preview.tryRequestLoad()) return;
 
+        if (source instanceof CustomFontSource) {
+            File file = new File(ClientEmojiHandler.FONTS_DIR, source.getId());
+            if (file.isFile()) {
+                loadFontPreview(source.getId(), file, preview);
+            } else {
+                preview.setUnsupported("File not found");
+            }
+            return;
+        }
+
         if (source instanceof MinecraftFontSource) {
             preview.setUnsupported(null);
             return;
@@ -681,7 +734,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     }
 
     private void loadFontPreview(String filename, File file, PreviewTexture preview) {
-        String cacheKey = file.getAbsolutePath();
+        Map<String, Float> variationSettings = getVariationSettings(filename);
+        String cacheKey = file.getAbsolutePath() + "#" + FontVariationConfig.signature(variationSettings);
         long fileSize = file.length();
         long lastModified = file.lastModified();
         CachedPreviewStrip cached = getCachedPreviewStrip(cacheKey, fileSize, lastModified);
@@ -693,7 +747,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
                 PREVIEW_LOAD_SEMAPHORE.acquire();
                 permit = true;
                 byte[] data = Files.readAllBytes(file.toPath());
-                ColorFont font = ColorFont.load(new ByteArrayInputStream(data));
+                ColorFont font = ColorFont.load(new ByteArrayInputStream(data), variationSettings);
                 BufferedImage strip = buildPreviewStrip(font);
                 preview.setImage(strip);
                 cachePreviewStrip(new CachedPreviewStrip(cacheKey, fileSize, lastModified, strip, null));
@@ -934,6 +988,41 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         return mx >= x && mx < x + w && my >= y && my < y + h;
     }
 
+    private Map<String, Float> getVariationSettings(String fontId) {
+        return FontVariationConfig.copySettings(fontVariationOverrides.get(fontId));
+    }
+
+    private void setVariationSettings(String fontId, Map<String, Float> settings) {
+        if (settings == null || settings.isEmpty()) {
+            fontVariationOverrides.remove(fontId);
+        } else {
+            fontVariationOverrides.put(fontId, new LinkedHashMap<>(settings));
+        }
+        invalidatePreview(fontId);
+        dirty = true;
+    }
+
+    private void invalidatePreview(String fontId) {
+        PreviewTexture preview = previews.get(fontId);
+        if (preview != null) {
+            preview.reset();
+        }
+    }
+
+    private void pruneVariationOverrides() {
+        List<String> validIds = new ArrayList<>();
+        for (FontEntry entry : availableEntries) {
+            validIds.add(entry.source.getId());
+        }
+        for (FontEntry entry : enabledEntries) {
+            if (!validIds.contains(entry.source.getId())) {
+                validIds.add(entry.source.getId());
+            }
+        }
+        fontVariationOverrides.keySet()
+            .removeIf(id -> !validIds.contains(id));
+    }
+
     private int[] getDropZoneBounds() {
         int zoneW = Math.min(width - PANEL_MARGIN * 6, 404);
         int zoneH = 80;
@@ -1043,6 +1132,667 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
     // --- Inner classes ---
 
+    private static final class FontSettingsScreen extends GuiScreen {
+
+        private static final int BTN_SAVE = 1;
+        private static final int BTN_RESET = 2;
+        private static final int BTN_CANCEL = 3;
+        private static final int PANEL_W = 284;
+        private static final int PREVIEW_W = PANEL_W - 20;
+
+        private final FontSelectionScreen parent;
+        private final FontEntry entry;
+        private final String fontId;
+        private final String displayName;
+        private final List<VariationAxis> axes;
+        private final Map<String, Float> values;
+        private final float defaultDisplayHeight;
+        private final float defaultWidthPercent;
+        private final float defaultVerticalOffset;
+        private float displayHeight;
+        private float widthPercent;
+        private float verticalOffset;
+        private int draggingAxis = -1;
+        private boolean draggingSize;
+        private boolean draggingWidth;
+        private boolean draggingYOffset;
+        private PreviewTexture previewTexture;
+        private String previewSignature = "";
+        private Font previewBaseFont;
+        private PreviewTextFontSource previewTextSource;
+        private FontStack previewFontStack;
+
+        private FontSettingsScreen(FontSelectionScreen parent, FontEntry entry) {
+            this.parent = parent;
+            this.entry = entry;
+            this.fontId = entry.source.getId();
+            this.displayName = entry.source.getDisplayName();
+            this.axes = entry.getSupportedVariationAxes();
+            this.values = parent.getVariationSettings(fontId);
+            this.defaultDisplayHeight = entry.source.preserveTextLineMetrics()
+                ? EmojiConfig.getFontStackTextDisplayHeight()
+                : 8.0f;
+            this.defaultWidthPercent = FontVariationConfig.DEFAULT_WIDTH_PERCENT;
+            this.defaultVerticalOffset = FontVariationConfig.DEFAULT_Y_OFFSET;
+            this.displayHeight = FontVariationConfig.getDisplayHeight(this.values, entry.source.getDisplayHeight());
+            this.widthPercent = FontVariationConfig.getWidthPercent(this.values, this.defaultWidthPercent);
+            this.verticalOffset = FontVariationConfig.getVerticalOffset(this.values, this.defaultVerticalOffset);
+            for (VariationAxis axis : axes) {
+                if (!values.containsKey(axis.getTag())) {
+                    values.put(axis.getTag(), axis.getDefaultValue());
+                }
+            }
+        }
+
+        @Override
+        public void initGui() {
+            buttonList.clear();
+            int panelH = getPanelHeight();
+            int panelX = (width - PANEL_W) / 2;
+            int panelY = getPanelY();
+            int btnY = panelY + panelH - 28;
+            buttonList.add(new GuiButton(BTN_SAVE, panelX + 10, btnY, 74, 20, "Save"));
+            buttonList.add(new GuiButton(BTN_RESET, panelX + (PANEL_W - 60) / 2, btnY, 60, 20, "Reset"));
+            buttonList.add(new GuiButton(BTN_CANCEL, panelX + PANEL_W - 84, btnY, 74, 20, "Cancel"));
+            if (!entry.source.preserveTextLineMetrics() && previewTexture == null) {
+                previewTexture = new PreviewTexture("font_settings_" + fontId, true);
+                mc.getTextureManager()
+                    .loadTexture(previewTexture.location, previewTexture);
+            }
+            previewBaseFont = loadPreviewBaseFont();
+            previewSignature = "";
+        }
+
+        @Override
+        protected void actionPerformed(GuiButton button) {
+            if (button.id == BTN_CANCEL) {
+                mc.displayGuiScreen(parent);
+                return;
+            }
+            if (button.id == BTN_RESET) {
+                displayHeight = defaultDisplayHeight;
+                widthPercent = defaultWidthPercent;
+                verticalOffset = defaultVerticalOffset;
+                for (VariationAxis axis : axes) {
+                    values.put(axis.getTag(), axis.getDefaultValue());
+                }
+                previewSignature = "";
+                return;
+            }
+            if (button.id == BTN_SAVE) {
+                parent.setVariationSettings(fontId, buildStoredSettings());
+                parent.persistChanges();
+                parent.rebuildLists();
+                parent.showStatus("Saved settings for " + displayName, 0xFF80FF80);
+                mc.displayGuiScreen(parent);
+            }
+        }
+
+        @Override
+        protected void mouseClicked(int mouseX, int mouseY, int button) {
+            super.mouseClicked(mouseX, mouseY, button);
+            if (button != 0) return;
+
+            if (isInsideSizeSlider(mouseX, mouseY)) {
+                draggingSize = true;
+                updateSizeFromMouse(mouseX);
+                return;
+            }
+            if (isInsideWidthSlider(mouseX, mouseY)) {
+                draggingWidth = true;
+                updateWidthFromMouse(mouseX);
+                return;
+            }
+            if (isInsideYOffsetSlider(mouseX, mouseY)) {
+                draggingYOffset = true;
+                updateYOffsetFromMouse(mouseX);
+                return;
+            }
+            for (int i = 0; i < axes.size(); i++) {
+                if (isInsideSlider(mouseX, mouseY, i)) {
+                    draggingAxis = i;
+                    updateAxisFromMouse(i, mouseX);
+                    return;
+                }
+            }
+        }
+
+        @Override
+        protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+            if (clickedMouseButton == 0) {
+                if (draggingSize) {
+                    updateSizeFromMouse(mouseX);
+                    return;
+                }
+                if (draggingWidth) {
+                    updateWidthFromMouse(mouseX);
+                    return;
+                }
+                if (draggingYOffset) {
+                    updateYOffsetFromMouse(mouseX);
+                    return;
+                }
+                if (draggingAxis >= 0 && draggingAxis < axes.size()) {
+                    updateAxisFromMouse(draggingAxis, mouseX);
+                    return;
+                }
+            }
+            super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
+        }
+
+        @Override
+        protected void mouseMovedOrUp(int mouseX, int mouseY, int state) {
+            if (state != -1) {
+                draggingAxis = -1;
+                draggingSize = false;
+                draggingWidth = false;
+                draggingYOffset = false;
+            }
+            super.mouseMovedOrUp(mouseX, mouseY, state);
+        }
+
+        @Override
+        protected void keyTyped(char typedChar, int keyCode) {
+            if (keyCode == 1) {
+                mc.displayGuiScreen(parent);
+                return;
+            }
+            if (keyCode == 28 || keyCode == 156) {
+                parent.setVariationSettings(fontId, buildStoredSettings());
+                parent.persistChanges();
+                parent.rebuildLists();
+                parent.showStatus("Saved settings for " + displayName, 0xFF80FF80);
+                mc.displayGuiScreen(parent);
+                return;
+            }
+            super.keyTyped(typedChar, keyCode);
+        }
+
+        @Override
+        public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+            parent.drawScreen(-1, -1, partialTicks);
+            drawRect(0, 0, width, height, 0x90000000);
+
+            ensurePreviewUpToDate();
+
+            int panelH = getPanelHeight();
+            int panelX = (width - PANEL_W) / 2;
+            int panelY = getPanelY();
+
+            Gui.drawRect(panelX - 1, panelY - 1, panelX + PANEL_W + 1, panelY + panelH + 1, 0xA0A0A0A0);
+            Gui.drawRect(panelX, panelY, panelX + PANEL_W, panelY + panelH, 0xF0101010);
+
+            drawCenteredString(fontRendererObj, "Font Settings", width / 2, panelY + 8, 0xFFFFFF);
+
+            String title = displayName;
+            int maxTitleW = PANEL_W - 20;
+            if (fontRendererObj.getStringWidth(title) > maxTitleW) {
+                title = fontRendererObj.trimStringToWidth(title, maxTitleW - fontRendererObj.getStringWidth("..."))
+                    + "...";
+            }
+            drawCenteredString(fontRendererObj, title, width / 2, panelY + 20, 0xFFD0D0D0);
+
+            drawPreview(panelX + 10, panelY + 34);
+
+            int rowsY = panelY + 34 + getPreviewHeight() + 12;
+            drawSizeRow(panelX, rowsY, mouseX, mouseY);
+            int nextRowIndex = 1;
+            if (entry.source.preserveTextLineMetrics()) {
+                drawWidthRow(panelX, rowsY + nextRowIndex * getRowHeight(), mouseX, mouseY);
+                nextRowIndex++;
+                drawYOffsetRow(panelX, rowsY + nextRowIndex * getRowHeight(), mouseX, mouseY);
+                nextRowIndex++;
+            }
+            for (int i = 0; i < axes.size(); i++) {
+                drawAxisRow(panelX, rowsY + (nextRowIndex + i) * getRowHeight(), i, mouseX, mouseY);
+            }
+
+            super.drawScreen(mouseX, mouseY, partialTicks);
+        }
+
+        @Override
+        public boolean doesGuiPauseGame() {
+            return false;
+        }
+
+        @Override
+        public void onGuiClosed() {
+            GlyphCache.invalidate(getPreviewTextSourceId());
+            super.onGuiClosed();
+        }
+
+        private int getRowHeight() {
+            return getLayoutMetrics()[0];
+        }
+
+        private int getPreviewHeight() {
+            return getLayoutMetrics()[1];
+        }
+
+        private int getPanelHeight() {
+            return getLayoutMetrics()[2];
+        }
+
+        private int getPanelY() {
+            return getLayoutMetrics()[3];
+        }
+
+        private int[] getLayoutMetrics() {
+            int rowH = 26;
+            int previewH = 72;
+            while (88 + previewH + getSliderRowCount() * rowH > height - 16 && (previewH > 44 || rowH > 20)) {
+                if (previewH > 44) {
+                    previewH -= 4;
+                } else {
+                    rowH -= 2;
+                }
+            }
+            int panelH = Math.min(height - 16, 88 + previewH + getSliderRowCount() * rowH);
+            int panelY = Math.max(8, (height - panelH) / 2);
+            return new int[] { rowH, previewH, panelH, panelY };
+        }
+
+        private int getSliderRowCount() {
+            return 1 + axes.size() + (entry.source.preserveTextLineMetrics() ? 2 : 0);
+        }
+
+        private void drawPreview(int x, int y) {
+            int previewH = getPreviewHeight();
+            Gui.drawRect(x, y, x + PREVIEW_W, y + previewH, 0x40283040);
+            parent.drawOutline(x, y, PREVIEW_W, previewH, 0x50FFFFFF);
+            int chatX = x + 8;
+            int chatY = y + 6;
+            int chatW = PREVIEW_W - 16;
+            int buttonW = Math.min(200, PREVIEW_W - 36);
+            int buttonX = x + (PREVIEW_W - buttonW) / 2;
+            int buttonY = y + previewH - 22;
+            int chatBottom = buttonY - 6;
+            int chatH = Math.max(22, chatBottom - chatY);
+            Gui.drawRect(chatX, chatY, chatX + chatW, chatY + chatH, 0x88202020);
+
+            GuiButton previewButton = new GuiButton(-1337, buttonX, buttonY, buttonW, 20, "");
+            previewButton.drawButton(mc, -1000, -1000);
+
+            if (entry.source.preserveTextLineMetrics() && previewFontStack != null) {
+                String buttonSample = "Singleplayer";
+                int textColor = 0xE0E0E0;
+
+                runWithPreviewFontStack(() -> {
+                    drawPreviewChat(chatX, chatY, chatW, chatH, textColor);
+                    int buttonTextWidth = fontRendererObj.getStringWidth(buttonSample);
+                    int buttonTextX = buttonX + (buttonW - buttonTextWidth) / 2;
+                    int buttonTextY = buttonY + 6;
+                    fontRendererObj.drawStringWithShadow(buttonSample, buttonTextX, buttonTextY, textColor);
+                });
+                return;
+            }
+
+            if (previewTexture != null && previewTexture.canRender()) {
+                mc.getTextureManager()
+                    .bindTexture(previewTexture.location);
+                GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+                Tessellator tessellator = Tessellator.instance;
+                tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+                tessellator.addVertexWithUV(x + 2, y + 2, 0, 0, 0);
+                tessellator.addVertexWithUV(x + 2, y + previewH - 2, 0, 0, 1);
+                tessellator.addVertexWithUV(x + PREVIEW_W - 2, y + 2, 0, 1, 0);
+                tessellator.addVertexWithUV(x + PREVIEW_W - 2, y + previewH - 2, 0, 1, 1);
+                tessellator.draw();
+                return;
+            }
+            String fallback = previewTexture != null && previewTexture.isUnsupported() ? "Preview unavailable"
+                : "Loading preview...";
+            drawCenteredString(fontRendererObj, fallback, x + PREVIEW_W / 2, y + previewH / 2 - 4, 0xFFB7C7D7);
+        }
+
+        private void drawPreviewChat(int chatX, int chatY, int chatW, int chatH, int textColor) {
+            List<String> lines = new ArrayList<>(3);
+            lines.add("<alex> The quick brown fox");
+            lines.add("jumps over the lazy dog");
+            lines.add("This is how it will look in chat.");
+
+            int textMaxWidth = Math.max(40, chatW - 8);
+            int maxLines = Math.max(2, chatH / 10);
+            List<String> visibleLines = new ArrayList<>(maxLines);
+            for (String rawLine : lines) {
+                String fitted = fontRendererObj.trimStringToWidth(rawLine, textMaxWidth);
+                if (!fitted.isEmpty()) {
+                    visibleLines.add(fitted);
+                }
+                if (visibleLines.size() >= maxLines) {
+                    break;
+                }
+            }
+
+            int lineY = chatY + 3;
+            for (String line : visibleLines) {
+                fontRendererObj.drawStringWithShadow(line, chatX + 4, lineY, textColor);
+                lineY += 9;
+                if (lineY + 8 > chatY + chatH) {
+                    break;
+                }
+            }
+        }
+
+        private void drawSizeRow(int panelX, int rowY, int mouseX, int mouseY) {
+            drawSliderRow(
+                panelX,
+                rowY,
+                "Size",
+                displayHeight,
+                formatSizeValue(displayHeight),
+                FontVariationConfig.MIN_SIZE,
+                FontVariationConfig.MAX_SIZE,
+                isInsideSizeSlider(mouseX, mouseY));
+        }
+
+        private void drawWidthRow(int panelX, int rowY, int mouseX, int mouseY) {
+            drawSliderRow(
+                panelX,
+                rowY,
+                "Width",
+                widthPercent,
+                formatWidthValue(widthPercent),
+                FontVariationConfig.MIN_WIDTH_PERCENT,
+                FontVariationConfig.MAX_WIDTH_PERCENT,
+                isInsideWidthSlider(mouseX, mouseY));
+        }
+
+        private void drawYOffsetRow(int panelX, int rowY, int mouseX, int mouseY) {
+            drawSliderRow(
+                panelX,
+                rowY,
+                "Y Offset",
+                verticalOffset,
+                formatYOffsetValue(verticalOffset),
+                FontVariationConfig.MIN_Y_OFFSET,
+                FontVariationConfig.MAX_Y_OFFSET,
+                isInsideYOffsetSlider(mouseX, mouseY));
+        }
+
+        private void drawAxisRow(int panelX, int rowY, int axisIndex, int mouseX, int mouseY) {
+            VariationAxis axis = axes.get(axisIndex);
+            float value = values.get(axis.getTag());
+            drawSliderRow(
+                panelX,
+                rowY,
+                axis.getDisplayName(),
+                value,
+                formatAxisValue(axis, value),
+                axis.getMinValue(),
+                axis.getMaxValue(),
+                isInsideSlider(mouseX, mouseY, axisIndex));
+        }
+
+        private boolean isInsideSlider(int mouseX, int mouseY, int axisIndex) {
+            return isInsideSliderRow(mouseX, mouseY, getAxisRowIndex(axisIndex));
+        }
+
+        private boolean isInsideSizeSlider(int mouseX, int mouseY) {
+            return isInsideSliderRow(mouseX, mouseY, 0);
+        }
+
+        private boolean isInsideWidthSlider(int mouseX, int mouseY) {
+            return entry.source.preserveTextLineMetrics() && isInsideSliderRow(mouseX, mouseY, 1);
+        }
+
+        private boolean isInsideYOffsetSlider(int mouseX, int mouseY) {
+            return entry.source.preserveTextLineMetrics() && isInsideSliderRow(mouseX, mouseY, 2);
+        }
+
+        private boolean isInsideSliderRow(int mouseX, int mouseY, int rowIndex) {
+            int panelX = (width - PANEL_W) / 2;
+            int panelY = getPanelY();
+            int rowsY = panelY + 34 + getPreviewHeight() + 12;
+            int sliderX = panelX + 10;
+            int sliderY = rowsY + rowIndex * getRowHeight() + 13;
+            int sliderW = PANEL_W - 20;
+            return isInside(mouseX, mouseY, sliderX, sliderY - 2, sliderW, 10);
+        }
+
+        private int getAxisRowIndex(int axisIndex) {
+            return 1 + (entry.source.preserveTextLineMetrics() ? 2 : 0) + axisIndex;
+        }
+
+        private void drawSliderRow(int panelX, int rowY, String label, float value, String valueText, float min,
+            float max, boolean hovered) {
+            fontRendererObj.drawStringWithShadow(label, panelX + 10, rowY, 0xFFE8E8E8);
+            fontRendererObj.drawStringWithShadow(
+                valueText,
+                panelX + PANEL_W - 10 - fontRendererObj.getStringWidth(valueText),
+                rowY,
+                0xFFBFD7F2);
+
+            int sliderX = panelX + 10;
+            int sliderY = rowY + 13;
+            int sliderW = PANEL_W - 20;
+            Gui.drawRect(sliderX, sliderY, sliderX + sliderW, sliderY + 4, hovered ? 0x704B5F75 : 0x50303840);
+            float ratio = getSliderRatio(value, min, max);
+            int fillW = Math.max(4, Math.round(ratio * sliderW));
+            Gui.drawRect(sliderX, sliderY, sliderX + fillW, sliderY + 4, hovered ? 0xC070A7E8 : 0xA0588CC8);
+            int knobX = sliderX + Math.round(ratio * (sliderW - 6));
+            Gui.drawRect(knobX, sliderY - 2, knobX + 6, sliderY + 6, hovered ? 0xFFEAF5FF : 0xFFD5E7FA);
+        }
+
+        private void updateSizeFromMouse(int mouseX) {
+            int panelX = (width - PANEL_W) / 2;
+            int sliderX = panelX + 10;
+            int sliderW = PANEL_W - 20;
+            float ratio = clamp01((float) (mouseX - sliderX) / (float) sliderW);
+            displayHeight = FontVariationConfig.clampDisplayHeight(
+                FontVariationConfig.MIN_SIZE + (FontVariationConfig.MAX_SIZE - FontVariationConfig.MIN_SIZE) * ratio);
+            previewSignature = "";
+        }
+
+        private void updateWidthFromMouse(int mouseX) {
+            int panelX = (width - PANEL_W) / 2;
+            int sliderX = panelX + 10;
+            int sliderW = PANEL_W - 20;
+            float ratio = clamp01((float) (mouseX - sliderX) / (float) sliderW);
+            widthPercent = FontVariationConfig.clampWidthPercent(
+                FontVariationConfig.MIN_WIDTH_PERCENT
+                    + (FontVariationConfig.MAX_WIDTH_PERCENT - FontVariationConfig.MIN_WIDTH_PERCENT) * ratio);
+            previewSignature = "";
+        }
+
+        private void updateYOffsetFromMouse(int mouseX) {
+            int panelX = (width - PANEL_W) / 2;
+            int sliderX = panelX + 10;
+            int sliderW = PANEL_W - 20;
+            float ratio = clamp01((float) (mouseX - sliderX) / (float) sliderW);
+            verticalOffset = FontVariationConfig.clampVerticalOffset(
+                FontVariationConfig.MIN_Y_OFFSET
+                    + (FontVariationConfig.MAX_Y_OFFSET - FontVariationConfig.MIN_Y_OFFSET) * ratio);
+            previewSignature = "";
+        }
+
+        private void updateAxisFromMouse(int axisIndex, int mouseX) {
+            VariationAxis axis = axes.get(axisIndex);
+            int panelX = (width - PANEL_W) / 2;
+            int sliderX = panelX + 10;
+            int sliderW = PANEL_W - 20;
+            float ratio = clamp01((float) (mouseX - sliderX) / (float) sliderW);
+            float value = axis.getMinValue() + (axis.getMaxValue() - axis.getMinValue()) * ratio;
+            if ("ital".equals(axis.getTag())) {
+                value = value >= (axis.getMinValue() + axis.getMaxValue()) * 0.5f ? axis.getMaxValue()
+                    : axis.getMinValue();
+            }
+            values.put(axis.getTag(), clampFloat(value, axis.getMinValue(), axis.getMaxValue()));
+            previewSignature = "";
+        }
+
+        private Map<String, Float> buildStoredSettings() {
+            Map<String, Float> stored = new LinkedHashMap<>();
+            if (Math.abs(displayHeight - defaultDisplayHeight) > 0.001f) {
+                stored.put(FontVariationConfig.SIZE_KEY, FontVariationConfig.clampDisplayHeight(displayHeight));
+            }
+            if (Math.abs(widthPercent - defaultWidthPercent) > 0.001f) {
+                stored.put(FontVariationConfig.WIDTH_KEY, FontVariationConfig.clampWidthPercent(widthPercent));
+            }
+            if (Math.abs(verticalOffset - defaultVerticalOffset) > 0.001f) {
+                stored.put(FontVariationConfig.Y_OFFSET_KEY, FontVariationConfig.clampVerticalOffset(verticalOffset));
+            }
+            for (VariationAxis axis : axes) {
+                float value = values.get(axis.getTag());
+                if (Math.abs(value - axis.getDefaultValue()) > 0.0005f) {
+                    stored.put(axis.getTag(), value);
+                }
+            }
+            return stored;
+        }
+
+        private float getSliderRatio(float value, float min, float max) {
+            float span = max - min;
+            if (span <= 0.0001f) return 0.0f;
+            return clamp01((value - min) / span);
+        }
+
+        private String formatAxisValue(VariationAxis axis, float value) {
+            if ("ital".equals(axis.getTag())) {
+                return value >= 0.5f ? "On" : "Off";
+            }
+            if (Math.abs(value - Math.round(value)) < 0.0005f) {
+                return Integer.toString(Math.round(value));
+            }
+            return String.format(Locale.ROOT, "%.2f", value);
+        }
+
+        private String formatSizeValue(float value) {
+            if (Math.abs(value - Math.round(value)) < 0.0005f) {
+                return Math.round(value) + " px";
+            }
+            return String.format(Locale.ROOT, "%.1f px", value);
+        }
+
+        private String formatWidthValue(float value) {
+            if (Math.abs(value - Math.round(value)) < 0.0005f) {
+                return Math.round(value) + "%";
+            }
+            return String.format(Locale.ROOT, "%.1f%%", value);
+        }
+
+        private String formatYOffsetValue(float value) {
+            if (Math.abs(value) < 0.0005f) {
+                return "0 px";
+            }
+            if (Math.abs(value - Math.round(value)) < 0.0005f) {
+                return String.format(Locale.ROOT, "%+d px", Math.round(value));
+            }
+            return String.format(Locale.ROOT, "%+.1f px", value);
+        }
+
+        private void ensurePreviewUpToDate() {
+            String signature = FontVariationConfig.signature(buildStoredSettings());
+            if (signature.equals(previewSignature)) return;
+            previewSignature = signature;
+
+            if (entry.source.preserveTextLineMetrics()) {
+                GlyphCache.invalidate(getPreviewTextSourceId());
+                previewTextSource = buildPreviewTextSource();
+                if (previewTextSource == null) {
+                    previewFontStack = null;
+                } else {
+                    previewFontStack = new FontStack(Arrays.asList(previewTextSource, new MinecraftFontSource()));
+                }
+                return;
+            }
+
+            if (previewTexture == null) return;
+            BufferedImage image = buildLivePreviewImage(PREVIEW_W - 4, getPreviewHeight() - 4);
+            if (image != null) {
+                previewTexture.setImage(image);
+            } else {
+                previewTexture.setUnsupported("Preview unavailable");
+            }
+        }
+
+        private BufferedImage buildLivePreviewImage(int width, int height) {
+            ColorFont colorFont = entry.source.getColorFont();
+            if (colorFont != null) {
+                return buildEmojiPreviewImage(colorFont, width, height);
+            }
+            return null;
+        }
+
+        private BufferedImage buildEmojiPreviewImage(ColorFont colorFont, int width, int height) {
+            BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = image.createGraphics();
+            int glyphSize = Math.max(18, Math.min(40, Math.round(displayHeight * 2.8f)));
+            int spacing = 4;
+            int totalWidth = PREVIEW_CODEPOINTS.length * glyphSize + (PREVIEW_CODEPOINTS.length - 1) * spacing;
+            int x = Math.max(4, (width - totalWidth) / 2);
+            int y = Math.max(2, (height - glyphSize) / 2);
+            for (int codepoint : PREVIEW_CODEPOINTS) {
+                BufferedImage glyph = colorFont.renderGlyph(codepoint, glyphSize);
+                if (glyph != null) {
+                    g.drawImage(glyph, x, y, null);
+                }
+                x += glyphSize + spacing;
+            }
+            g.dispose();
+            return image;
+        }
+
+        private PreviewTextFontSource buildPreviewTextSource() {
+            if (previewBaseFont == null) {
+                return null;
+            }
+            return new PreviewTextFontSource(
+                getPreviewTextSourceId(),
+                displayName,
+                previewBaseFont,
+                axes,
+                buildStoredSettings(),
+                displayHeight);
+        }
+
+        private String getPreviewTextSourceId() {
+            return "__font_preview__" + fontId;
+        }
+
+        private void runWithPreviewFontStack(Runnable task) {
+            FontStack previous = ClientEmojiHandler.pushFontStackOverride(previewFontStack);
+            try {
+                task.run();
+            } finally {
+                ClientEmojiHandler.popFontStackOverride(previous);
+            }
+        }
+
+        private Font loadPreviewBaseFont() {
+            if (entry.source instanceof MinecraftFontSource) {
+                return null;
+            }
+            try {
+                if (entry.source instanceof CustomFontSource) {
+                    File file = new File(ClientEmojiHandler.FONTS_DIR, fontId);
+                    if (!file.isFile()) return null;
+                    return Font.createFont(Font.TRUETYPE_FONT, file);
+                }
+                if ("twemoji".equals(fontId)) {
+                    try (InputStream in = FontSelectionScreen.class
+                        .getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
+                        if (in == null) return null;
+                        return Font.createFont(Font.TRUETYPE_FONT, in);
+                    }
+                }
+            } catch (Exception ignored) {}
+            return null;
+        }
+
+        private String pickPreviewSampleText() {
+            return "The quick brown fox jumps over the lazy dog";
+        }
+
+        private static float clamp01(float value) {
+            return Math.max(0.0f, Math.min(1.0f, value));
+        }
+
+        private static float clampFloat(float value, float min, float max) {
+            return Math.max(min, Math.min(max, value));
+        }
+    }
+
     private final class FontEntry {
 
         final FontSource source;
@@ -1058,6 +1808,20 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
         boolean canRemove() {
             return !source.isBuiltIn();
+        }
+
+        boolean hasSettingsButton() {
+            return enabled && !(source instanceof MinecraftFontSource);
+        }
+
+        List<VariationAxis> getSupportedVariationAxes() {
+            List<VariationAxis> axes = new ArrayList<>();
+            for (VariationAxis axis : source.getVariationAxes()) {
+                if (axis.isSupportedForUi()) {
+                    axes.add(axis);
+                }
+            }
+            return axes;
         }
 
         void draw(int x, int y, int w, int mouseX, int mouseY) {
@@ -1077,7 +1841,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             if (source instanceof MinecraftFontSource) {
                 title = "Minecraft (vanilla)";
             }
-            int maxTitleW = w - CARD_PAD * 2 - (enabled ? (MINI_BTN + 2) * 3 + 4 : MINI_BTN + 6);
+            int rightButtonCount = enabled ? (hasSettingsButton() ? 4 : 3) : (canRemove() ? 2 : 1);
+            int maxTitleW = w - CARD_PAD * 2 - rightButtonCount * (MINI_BTN + 2) - 4;
             if (fontRendererObj.getStringWidth(title) > maxTitleW) {
                 while (fontRendererObj.getStringWidth(title + "...") > maxTitleW && title.length() > 1) {
                     title = title.substring(0, title.length() - 1);
@@ -1105,6 +1870,12 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             if (enabled) {
                 // Up / Down / Disable buttons
                 int idx = enabledEntries.indexOf(this);
+                if (hasSettingsButton()) {
+                    btnX -= MINI_BTN;
+                    boolean settingsHovered = isInside(mouseX, mouseY, btnX, btnY, MINI_BTN, MINI_BTN);
+                    drawMiniButton(btnX, btnY, SETTINGS_GEAR, settingsHovered, 0x60303030, 0x90405070);
+                }
+
                 btnX -= MINI_BTN;
                 boolean disableHovered = isInside(mouseX, mouseY, btnX, btnY, MINI_BTN, MINI_BTN);
                 drawMiniButton(btnX, btnY, "<", disableHovered, 0x60303030, 0x90403030);
@@ -1134,18 +1905,23 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
         boolean isInsideActionButton(int mx, int my) {
             int btnX = lastDrawX + lastDrawW - CARD_PAD - MINI_BTN;
+            if (enabled && hasSettingsButton()) {
+                btnX -= MINI_BTN + 2;
+            }
             int btnY = lastDrawY + (CARD_HEIGHT - MINI_BTN) / 2;
             return isInside(mx, my, btnX, btnY, MINI_BTN, MINI_BTN);
         }
 
         boolean isInsideUpButton(int mx, int my) {
-            int btnX = lastDrawX + lastDrawW - CARD_PAD - MINI_BTN * 3 - 4;
+            int settingsOffset = hasSettingsButton() ? MINI_BTN + 2 : 0;
+            int btnX = lastDrawX + lastDrawW - CARD_PAD - settingsOffset - MINI_BTN * 3 - 4;
             int btnY = lastDrawY + (CARD_HEIGHT - MINI_BTN) / 2;
             return isInside(mx, my, btnX, btnY, MINI_BTN, MINI_BTN);
         }
 
         boolean isInsideDownButton(int mx, int my) {
-            int btnX = lastDrawX + lastDrawW - CARD_PAD - MINI_BTN * 2 - 2;
+            int settingsOffset = hasSettingsButton() ? MINI_BTN + 2 : 0;
+            int btnX = lastDrawX + lastDrawW - CARD_PAD - settingsOffset - MINI_BTN * 2 - 2;
             int btnY = lastDrawY + (CARD_HEIGHT - MINI_BTN) / 2;
             return isInside(mx, my, btnX, btnY, MINI_BTN, MINI_BTN);
         }
@@ -1155,6 +1931,251 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             int btnX = lastDrawX + lastDrawW - CARD_PAD - MINI_BTN * 2 - 2;
             int btnY = lastDrawY + (CARD_HEIGHT - MINI_BTN) / 2;
             return isInside(mx, my, btnX, btnY, MINI_BTN, MINI_BTN);
+        }
+
+        boolean isInsideSettingsButton(int mx, int my) {
+            if (!enabled || !hasSettingsButton()) return false;
+            int btnX = lastDrawX + lastDrawW - CARD_PAD - MINI_BTN;
+            int btnY = lastDrawY + (CARD_HEIGHT - MINI_BTN) / 2;
+            return isInside(mx, my, btnX, btnY, MINI_BTN, MINI_BTN);
+        }
+    }
+
+    private static final class PreviewTextFontSource extends FontSource {
+
+        private static final FontRenderContext CONTEXT = new FontRenderContext(new AffineTransform(), true, false);
+        private final String id;
+        private final String displayName;
+        private final Font font;
+        private final float displayHeight;
+        private final float widthScale;
+        private final float verticalOffset;
+
+        private PreviewTextFontSource(String id, String displayName, Font baseFont, List<VariationAxis> axes,
+            Map<String, Float> settings, float displayHeight) {
+            this.id = id;
+            this.displayName = displayName;
+            this.displayHeight = FontVariationConfig.clampDisplayHeight(displayHeight);
+            this.widthScale = FontVariationConfig.getWidthScale(settings, FontVariationConfig.DEFAULT_WIDTH_PERCENT);
+            this.verticalOffset = FontVariationConfig.getVerticalOffset(settings, FontVariationConfig.DEFAULT_Y_OFFSET);
+
+            Font derived = baseFont.deriveFont(256.0f);
+            this.font = ColorFont
+                .applyVariationSettings(derived, axes, FontVariationConfig.copyVariationSettings(settings));
+        }
+
+        @Override
+        public String getId() {
+            return id;
+        }
+
+        @Override
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        @Override
+        public boolean isBuiltIn() {
+            return true;
+        }
+
+        @Override
+        public boolean hasGlyph(int codepoint) {
+            return layoutSingleGlyphVector(codepoint) != null;
+        }
+
+        @Override
+        public BufferedImage renderGlyph(int codepoint, int size) {
+            return renderTextGlyph(codepoint, size);
+        }
+
+        @Override
+        public BufferedImage renderTextGlyph(int codepoint, int size) {
+            GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
+            if (glyphVector == null) {
+                return null;
+            }
+
+            Shape outline = glyphVector.getGlyphOutline(0);
+            Rectangle2D bounds = outline.getBounds2D();
+            float advance = getTextGlyphAdvance(codepoint, size);
+            if ((bounds == null || bounds.isEmpty()) && advance <= 0.0f) {
+                return null;
+            }
+
+            float pad = Math.max(1.0f, size * 0.03125f);
+            LineMetrics lineMetrics = font.getLineMetrics("Hg", CONTEXT);
+            double metricHeight = Math.max(1.0d, lineMetrics.getAscent() + lineMetrics.getDescent());
+            double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+
+            double minX = bounds != null ? Math.min(0.0d, bounds.getX()) : 0.0d;
+            double maxX = bounds != null && !bounds.isEmpty()
+                ? Math.max(
+                    bounds.getMaxX(),
+                    glyphVector.getGlyphPosition(1)
+                        .getX())
+                : glyphVector.getGlyphPosition(1)
+                    .getX();
+            int width = Math.max(1, (int) Math.ceil((maxX - minX) * scale + pad * 2.0d));
+
+            BufferedImage result = new BufferedImage(width, size, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2d = result.createGraphics();
+            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
+            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            g2d.setRenderingHint(
+                RenderingHints.KEY_ALPHA_INTERPOLATION,
+                RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+            g2d.setColor(java.awt.Color.WHITE);
+
+            var transform = new AffineTransform();
+            double baseline = Math.rint(pad + lineMetrics.getAscent() * scale);
+            double translateX = Math.rint(pad - minX * scale);
+            transform.translate(translateX, baseline);
+            transform.scale(scale, scale);
+            g2d.fill(transform.createTransformedShape(outline));
+            g2d.dispose();
+            return result;
+        }
+
+        @Override
+        public boolean canRender(int[] codepoints) {
+            return codepoints.length == 1 && hasGlyph(codepoints[0]);
+        }
+
+        @Override
+        public BufferedImage renderGlyphs(int[] codepoints, int size) {
+            return codepoints.length == 1 ? renderTextGlyph(codepoints[0], size) : null;
+        }
+
+        @Override
+        public float getTextGlyphAdvance(int codepoint, int size) {
+            GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
+            if (glyphVector == null) {
+                return -1.0f;
+            }
+
+            float pad = Math.max(1.0f, size * 0.03125f);
+            LineMetrics lineMetrics = font.getLineMetrics("Hg", CONTEXT);
+            double metricHeight = Math.max(1.0d, lineMetrics.getAscent() + lineMetrics.getDescent());
+            double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+            return (float) (glyphVector.getGlyphMetrics(0)
+                .getAdvanceX() * scale);
+        }
+
+        @Override
+        public float getTextGlyphOffsetX(int codepoint, int size) {
+            GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
+            if (glyphVector == null) {
+                return 0.0f;
+            }
+
+            Shape outline = glyphVector.getGlyphOutline(0);
+            Rectangle2D bounds = outline.getBounds2D();
+            if (bounds == null || bounds.isEmpty()) {
+                return 0.0f;
+            }
+
+            float pad = Math.max(1.0f, size * 0.03125f);
+            LineMetrics lineMetrics = font.getLineMetrics("Hg", CONTEXT);
+            double metricHeight = Math.max(1.0d, lineMetrics.getAscent() + lineMetrics.getDescent());
+            double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+            double minX = Math.min(0.0d, bounds.getX());
+            double translateX = Math.rint(pad - minX * scale);
+            return (float) (-translateX);
+        }
+
+        @Override
+        public org.fentanylsolutions.minemoticon.font.TextRunLayout layoutTextRun(String text, int size) {
+            if (text == null || text.isEmpty()) {
+                return null;
+            }
+
+            GlyphVector glyphVector = font
+                .layoutGlyphVector(CONTEXT, text.toCharArray(), 0, text.length(), Font.LAYOUT_LEFT_TO_RIGHT);
+            int codepointCount = text.codePointCount(0, text.length());
+            if (glyphVector.getNumGlyphs() != codepointCount) {
+                return null;
+            }
+
+            int[] charStarts = new int[codepointCount];
+            int cpIndex = 0;
+            for (int i = 0; i < text.length();) {
+                charStarts[cpIndex++] = i;
+                i += Character.charCount(text.codePointAt(i));
+            }
+
+            int[] glyphByChar = new int[text.length()];
+            java.util.Arrays.fill(glyphByChar, -1);
+            for (int glyphIndex = 0; glyphIndex < glyphVector.getNumGlyphs(); glyphIndex++) {
+                int charIndex = glyphVector.getGlyphCharIndex(glyphIndex);
+                if (charIndex >= 0 && charIndex < glyphByChar.length && glyphByChar[charIndex] == -1) {
+                    glyphByChar[charIndex] = glyphIndex;
+                }
+            }
+
+            float pad = Math.max(1.0f, size * 0.03125f);
+            LineMetrics lineMetrics = font.getLineMetrics("Hg", CONTEXT);
+            double metricHeight = Math.max(1.0d, lineMetrics.getAscent() + lineMetrics.getDescent());
+            double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+            float[] penPositions = new float[codepointCount];
+            int previousGlyph = -1;
+
+            for (int i = 0; i < codepointCount; i++) {
+                int glyphIndex = glyphByChar[charStarts[i]];
+                if (glyphIndex < 0 || glyphIndex == previousGlyph) {
+                    return null;
+                }
+                penPositions[i] = (float) (glyphVector.getGlyphPosition(glyphIndex)
+                    .getX() * scale);
+                previousGlyph = glyphIndex;
+            }
+
+            float totalAdvance = (float) (glyphVector.getGlyphPosition(glyphVector.getNumGlyphs())
+                .getX() * scale);
+            return new org.fentanylsolutions.minemoticon.font.TextRunLayout(penPositions, totalAdvance);
+        }
+
+        @Override
+        public boolean preserveTextLineMetrics() {
+            return true;
+        }
+
+        @Override
+        public boolean usesTextColor() {
+            return true;
+        }
+
+        @Override
+        public float getDisplayHeight() {
+            return displayHeight;
+        }
+
+        @Override
+        public float getWidthScale() {
+            return widthScale;
+        }
+
+        @Override
+        public float getVerticalOffset() {
+            return verticalOffset;
+        }
+
+        private GlyphVector layoutSingleGlyphVector(int codepoint) {
+            String text = new String(Character.toChars(codepoint));
+            GlyphVector glyphVector = font
+                .layoutGlyphVector(CONTEXT, text.toCharArray(), 0, text.length(), Font.LAYOUT_LEFT_TO_RIGHT);
+            if (glyphVector.getNumGlyphs() == 0) {
+                return null;
+            }
+
+            int glyphCode = glyphVector.getGlyphCode(0);
+            int missingGlyph = font.getMissingGlyphCode();
+            if (glyphCode == missingGlyph && codepoint != ' ') {
+                return null;
+            }
+            return glyphVector;
         }
     }
 
@@ -1180,6 +2201,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
     private static class PreviewTexture extends AbstractTexture {
 
         final ResourceLocation location;
+        private final boolean crispSampling;
         private final AtomicReference<BufferedImage> pending = new AtomicReference<>();
         private volatile boolean ready;
         private volatile boolean unsupported;
@@ -1187,7 +2209,12 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         private volatile boolean loadRequested;
 
         PreviewTexture(String id) {
+            this(id, false);
+        }
+
+        PreviewTexture(String id, boolean crispSampling) {
             this.location = new ResourceLocation(Minemoticon.MODID, "textures/fontpreview/" + Math.abs(id.hashCode()));
+            this.crispSampling = crispSampling;
         }
 
         boolean tryRequestLoad() {
@@ -1212,6 +2239,14 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             loadRequested = true;
         }
 
+        void reset() {
+            pending.set(null);
+            ready = false;
+            unsupported = false;
+            unsupportedReason = "";
+            loadRequested = false;
+        }
+
         boolean canRender() {
             return ready || pending.get() != null;
         }
@@ -1232,7 +2267,11 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             int id = super.getGlTextureId();
             BufferedImage img = pending.getAndSet(null);
             if (img != null) {
-                EmojiTextureUtil.uploadFilteredTexture(id, img);
+                if (crispSampling) {
+                    EmojiTextureUtil.uploadNearestTexture(id, img);
+                } else {
+                    EmojiTextureUtil.uploadFilteredTexture(id, img);
+                }
                 ready = true;
             }
             return id;

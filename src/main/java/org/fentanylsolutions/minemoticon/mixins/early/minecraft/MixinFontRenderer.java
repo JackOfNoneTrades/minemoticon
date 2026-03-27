@@ -2,16 +2,17 @@ package org.fentanylsolutions.minemoticon.mixins.early.minecraft;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.util.ResourceLocation;
 
 import org.fentanylsolutions.minemoticon.ClientEmojiHandler;
-import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.font.FontSource;
 import org.fentanylsolutions.minemoticon.font.FontStack;
 import org.fentanylsolutions.minemoticon.font.GlyphCache;
 import org.fentanylsolutions.minemoticon.font.MinecraftFontSource;
+import org.fentanylsolutions.minemoticon.font.TextRunLayout;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.fentanylsolutions.minemoticon.render.FontRendererEmojiCompat;
 import org.lwjgl.opengl.GL11;
@@ -141,6 +142,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         CallbackInfoReturnable<Integer> cir) {
         if (minemoticon$renderingCompatString) return;
         if (minemoticon$isSplashFontRenderer()) return;
+        if (minemoticon$shouldUseVanillaMainMenuSplash(y)) return;
         if (!Minecraft.getMinecraft()
             .func_152345_ab()) return;
         if (!minemoticon$shouldUseCompatString(text)) return;
@@ -158,6 +160,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         CallbackInfoReturnable<Integer> cir) {
         if (minemoticon$renderingCompatString) return;
         if (minemoticon$isSplashFontRenderer()) return;
+        if (minemoticon$shouldUseVanillaMainMenuSplash(y)) return;
         if (!Minecraft.getMinecraft()
             .func_152345_ab()) return;
         if (!minemoticon$shouldUseCompatString(text)) return;
@@ -213,12 +216,18 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         FontStack stack = ClientEmojiHandler.getFontStack();
 
         var vanillaBuf = new StringBuilder();
+        var customRunBuf = new StringBuilder();
+        FontSource customRunSource = null;
         int i = 0;
         while (i < text.length()) {
             char c0 = text.charAt(i);
             if (c0 == 167 && i + 1 < text.length()) {
                 if (vanillaBuf.length() > 0) {
                     minemoticon$flushVanillaText(vanillaBuf, shadow);
+                }
+                if (customRunBuf.length() > 0) {
+                    minemoticon$flushCustomTextRun(customRunBuf, customRunSource, shadow);
+                    customRunSource = null;
                 }
                 minemoticon$applyFormattingCode(text.charAt(i + 1), shadow);
                 i += 2;
@@ -230,18 +239,39 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
             FontSource source = stack.resolve(cp);
             boolean isVanilla = source == null || source instanceof MinecraftFontSource;
+            boolean isTextRunSource = minemoticon$isTextRunSource(source);
 
             if (isVanilla) {
+                if (customRunBuf.length() > 0) {
+                    minemoticon$flushCustomTextRun(customRunBuf, customRunSource, shadow);
+                    customRunSource = null;
+                }
                 vanillaBuf.append(text, i, i + charCount);
+            } else if (isTextRunSource) {
+                if (vanillaBuf.length() > 0) {
+                    minemoticon$flushVanillaText(vanillaBuf, shadow);
+                }
+                if (customRunSource != source && customRunBuf.length() > 0) {
+                    minemoticon$flushCustomTextRun(customRunBuf, customRunSource, shadow);
+                }
+                customRunSource = source;
+                customRunBuf.append(text, i, i + charCount);
             } else {
                 if (vanillaBuf.length() > 0) {
                     minemoticon$flushVanillaText(vanillaBuf, shadow);
+                }
+                if (customRunBuf.length() > 0) {
+                    minemoticon$flushCustomTextRun(customRunBuf, customRunSource, shadow);
+                    customRunSource = null;
                 }
                 minemoticon$renderFontStackGlyph(source, cp, shadow);
             }
             i += charCount;
         }
 
+        if (customRunBuf.length() > 0) {
+            minemoticon$flushCustomTextRun(customRunBuf, customRunSource, shadow);
+        }
         if (vanillaBuf.length() > 0) {
             minemoticon$flushVanillaText(vanillaBuf, shadow);
         }
@@ -251,18 +281,25 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
     private void minemoticon$renderFontStackGlyph(FontSource source, int codepoint, boolean shadow) {
         GlyphCache cache = GlyphCache.forSource(source);
         float[] uv = cache.getGlyphUV(codepoint);
-        float width = cache.getGlyphWidth(codepoint);
-        float displayHeight = source.preserveTextLineMetrics() ? EmojiConfig.getFontStackTextDisplayHeight() : 8.0f;
+        float drawWidth = cache.getGlyphDrawWidth(codepoint) * source.getWidthScale();
+        float advance = cache.getGlyphAdvance(codepoint) * source.getWidthScale();
+        float xOffset = cache.getGlyphOffsetX(codepoint) * source.getWidthScale();
+        float displayHeight = source.getDisplayHeight();
+        float verticalOffset = source.getVerticalOffset();
 
         if (uv == null) {
-            this.posX += width > 0.0f ? width : 8.0f;
+            this.posX += advance > 0.0f ? advance : 8.0f;
             return;
         }
 
         if (!shadow || source.usesTextColor()) {
-            float x0 = this.posX;
-            float y0 = this.posY + (8.0f - displayHeight) * 0.5f;
-            float x1 = x0 + width;
+            float x0 = this.posX + xOffset;
+            float y0 = this.posY + (8.0f - displayHeight) * 0.5f + verticalOffset;
+            if (source.usesTextColor()) {
+                x0 = Math.round(x0);
+                y0 = Math.round(y0);
+            }
+            float x1 = x0 + drawWidth;
             float y1 = y0 + displayHeight;
             GL11.glEnable(GL11.GL_TEXTURE_2D);
             Minecraft.getMinecraft()
@@ -291,9 +328,9 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         }
 
         if (source.usesTextColor() && this.boldStyle) {
-            float x0 = this.posX + 1.0f;
-            float y0 = this.posY + (8.0f - displayHeight) * 0.5f;
-            float x1 = x0 + width;
+            float x0 = Math.round(this.posX + xOffset) + 1.0f;
+            float y0 = Math.round(this.posY + (8.0f - displayHeight) * 0.5f + verticalOffset);
+            float x1 = x0 + drawWidth;
             float y1 = y0 + displayHeight;
 
             Tessellator tessellator = Tessellator.instance;
@@ -305,12 +342,110 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             tessellator.draw();
         }
 
-        float advance = width;
-        if (this.boldStyle && width > 0.0f) {
+        if (advance <= 0.0f) {
+            advance = drawWidth > 0.0f ? drawWidth : 8.0f;
+        }
+        if (this.boldStyle && advance > 0.0f) {
             advance += 1.0f;
         }
         minemoticon$drawDecorationLines(advance);
         this.posX += advance;
+    }
+
+    @Unique
+    private void minemoticon$flushCustomTextRun(StringBuilder customRunBuf, FontSource source, boolean shadow) {
+        if (customRunBuf.length() <= 0 || source == null) {
+            customRunBuf.setLength(0);
+            return;
+        }
+
+        String run = customRunBuf.toString();
+        customRunBuf.setLength(0);
+        GlyphCache cache = GlyphCache.forSource(source);
+        TextRunLayout layout = source.layoutTextRun(run, cache.getRenderSize());
+        int glyphCount = run.codePointCount(0, run.length());
+        if (layout == null || layout.getGlyphCount() != glyphCount) {
+            for (int i = 0; i < run.length();) {
+                int codepoint = run.codePointAt(i);
+                minemoticon$renderFontStackGlyph(source, codepoint, shadow);
+                i += Character.charCount(codepoint);
+            }
+            return;
+        }
+
+        float baseX = this.posX;
+        float displayHeight = source.getDisplayHeight();
+        float verticalOffset = source.getVerticalOffset();
+        float widthScale = source.getWidthScale();
+        float layoutScale = displayHeight / cache.getRenderSize();
+        float runAdvance = layout.getTotalAdvance() * layoutScale * widthScale;
+        float lineY = this.posY + (8.0f - displayHeight) * 0.5f + verticalOffset;
+        if (source.usesTextColor()) {
+            lineY = Math.round(lineY);
+        }
+
+        Minecraft.getMinecraft()
+            .getTextureManager()
+            .bindTexture(cache.getResourceLocation());
+        GL11.glEnable(GL11.GL_TEXTURE_2D);
+        GL11.glEnable(GL11.GL_BLEND);
+        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+        if (source.usesTextColor()) {
+            minemoticon$applyRenderColor(this.minemoticon$currentRenderColor);
+        } else {
+            GL11.glColor4f(1.0f, 1.0f, 1.0f, this.alpha);
+        }
+
+        int glyphIndex = 0;
+        for (int i = 0; i < run.length();) {
+            int codepoint = run.codePointAt(i);
+            float[] uv = cache.getGlyphUV(codepoint);
+            float drawWidth = cache.getGlyphDrawWidth(codepoint) * widthScale;
+            float xOffset = cache.getGlyphOffsetX(codepoint) * widthScale;
+            float penX = layout.getPenPosition(glyphIndex) * layoutScale * widthScale;
+
+            if (uv != null) {
+                float x0 = baseX + penX + xOffset;
+                float y0 = lineY;
+                float x1 = x0 + drawWidth;
+                float y1 = y0 + displayHeight;
+
+                Tessellator tessellator = Tessellator.instance;
+                tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+                tessellator.addVertexWithUV(x0, y0, 0.0, uv[0], uv[1]);
+                tessellator.addVertexWithUV(x0, y1, 0.0, uv[0], uv[3]);
+                tessellator.addVertexWithUV(x1, y0, 0.0, uv[2], uv[1]);
+                tessellator.addVertexWithUV(x1, y1, 0.0, uv[2], uv[3]);
+                tessellator.draw();
+
+                if (source.usesTextColor() && this.boldStyle) {
+                    float boldX0 = x0 + 1.0f;
+                    float boldX1 = boldX0 + drawWidth;
+                    tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+                    tessellator.addVertexWithUV(boldX0, y0, 0.0, uv[0], uv[1]);
+                    tessellator.addVertexWithUV(boldX0, y1, 0.0, uv[0], uv[3]);
+                    tessellator.addVertexWithUV(boldX1, y0, 0.0, uv[2], uv[1]);
+                    tessellator.addVertexWithUV(boldX1, y1, 0.0, uv[2], uv[3]);
+                    tessellator.draw();
+                }
+            }
+
+            glyphIndex++;
+            i += Character.charCount(codepoint);
+        }
+
+        if (this.boldStyle && runAdvance > 0.0f) {
+            runAdvance += glyphCount;
+        }
+        minemoticon$drawDecorationLines(runAdvance);
+        this.posX = baseX + runAdvance;
+    }
+
+    @Unique
+    private boolean minemoticon$isTextRunSource(FontSource source) {
+        return source != null && !(source instanceof MinecraftFontSource)
+            && source.preserveTextLineMetrics()
+            && source.usesTextColor();
     }
 
     @Unique
@@ -322,6 +457,8 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
         float width = 0.0f;
         var vanillaBuf = new StringBuilder();
+        var customRunBuf = new StringBuilder();
+        FontSource customRunSource = null;
         boolean bold = false;
         int i = 0;
         while (i < text.length()) {
@@ -330,6 +467,11 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
                 if (vanillaBuf.length() > 0) {
                     width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
                     vanillaBuf.setLength(0);
+                }
+                if (customRunBuf.length() > 0) {
+                    width += minemoticon$measureCustomTextRunExact(customRunBuf.toString(), customRunSource, bold);
+                    customRunBuf.setLength(0);
+                    customRunSource = null;
                 }
                 int format = minemoticon$getFormattingIndex(text.charAt(i + 1));
                 if (format < 16) {
@@ -348,17 +490,42 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
             FontSource source = stack.resolve(cp);
             boolean isVanilla = source == null || source instanceof MinecraftFontSource;
+            boolean isTextRunSource = minemoticon$isTextRunSource(source);
 
             if (isVanilla) {
+                if (customRunBuf.length() > 0) {
+                    width += minemoticon$measureCustomTextRunExact(customRunBuf.toString(), customRunSource, bold);
+                    customRunBuf.setLength(0);
+                    customRunSource = null;
+                }
                 vanillaBuf.append(text, i, i + charCount);
+            } else if (isTextRunSource) {
+                if (vanillaBuf.length() > 0) {
+                    width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
+                    vanillaBuf.setLength(0);
+                }
+                if (customRunSource != source && customRunBuf.length() > 0) {
+                    width += minemoticon$measureCustomTextRunExact(customRunBuf.toString(), customRunSource, bold);
+                    customRunBuf.setLength(0);
+                }
+                customRunSource = source;
+                customRunBuf.append(text, i, i + charCount);
             } else {
                 if (vanillaBuf.length() > 0) {
                     width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
                     vanillaBuf.setLength(0);
                 }
+                if (customRunBuf.length() > 0) {
+                    width += minemoticon$measureCustomTextRunExact(customRunBuf.toString(), customRunSource, bold);
+                    customRunBuf.setLength(0);
+                    customRunSource = null;
+                }
                 GlyphCache cache = GlyphCache.forSource(source);
-                float glyphW = cache.getGlyphWidth(cp);
-                float advance = glyphW > 0.0f ? glyphW : 8.0f;
+                float advance = cache.getGlyphAdvance(cp) * source.getWidthScale();
+                if (advance <= 0.0f) {
+                    float glyphW = cache.getGlyphDrawWidth(cp) * source.getWidthScale();
+                    advance = glyphW > 0.0f ? glyphW : 8.0f;
+                }
                 if (bold && advance > 0.0f) {
                     advance += 1.0f;
                 }
@@ -367,10 +534,46 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             i += charCount;
         }
 
+        if (customRunBuf.length() > 0) {
+            width += minemoticon$measureCustomTextRunExact(customRunBuf.toString(), customRunSource, bold);
+        }
         if (vanillaBuf.length() > 0) {
             width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
         }
 
+        return width;
+    }
+
+    @Unique
+    private float minemoticon$measureCustomTextRunExact(String text, FontSource source, boolean bold) {
+        if (text == null || text.isEmpty() || source == null) {
+            return 0.0f;
+        }
+
+        GlyphCache cache = GlyphCache.forSource(source);
+        TextRunLayout layout = source.layoutTextRun(text, cache.getRenderSize());
+        float width;
+        if (layout != null && layout.getGlyphCount() == text.codePointCount(0, text.length())) {
+            width = layout.getTotalAdvance() * source.getDisplayHeight()
+                / cache.getRenderSize()
+                * source.getWidthScale();
+        } else {
+            width = 0.0f;
+            for (int i = 0; i < text.length();) {
+                int codepoint = text.codePointAt(i);
+                float advance = cache.getGlyphAdvance(codepoint) * source.getWidthScale();
+                if (advance <= 0.0f) {
+                    float drawWidth = cache.getGlyphDrawWidth(codepoint) * source.getWidthScale();
+                    advance = drawWidth > 0.0f ? drawWidth : 8.0f;
+                }
+                width += advance;
+                i += Character.charCount(codepoint);
+            }
+        }
+
+        if (bold && width > 0.0f) {
+            width += text.codePointCount(0, text.length());
+        }
         return width;
     }
 
@@ -555,6 +758,11 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         return this.getClass()
             .getName()
             .endsWith("SplashFontRenderer");
+    }
+
+    @Unique
+    private boolean minemoticon$shouldUseVanillaMainMenuSplash(int y) {
+        return Minecraft.getMinecraft().currentScreen instanceof GuiMainMenu && y < 0;
     }
 
     @Unique

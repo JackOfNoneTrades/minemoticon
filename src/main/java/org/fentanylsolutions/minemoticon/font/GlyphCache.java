@@ -12,7 +12,6 @@ import javax.imageio.ImageIO;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.util.ResourceLocation;
 
-import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.lwjgl.opengl.GL11;
 
@@ -22,7 +21,8 @@ import org.lwjgl.opengl.GL11;
 public class GlyphCache {
 
     // Render at 4x display size for quality.
-    private static final int RENDER_SIZE = 32;
+    private static final int DEFAULT_RENDER_SIZE = 32;
+    private static final int TEXT_RENDER_SIZE = 48;
     private static final float DEFAULT_DISPLAY_HEIGHT = 8.0f;
     private static final int INITIAL_SIZE = 512;
     private static final int MAX_SIZE = 2048;
@@ -41,7 +41,9 @@ public class GlyphCache {
 
     // UV lookup: codepoint -> [u0, v0, u1, v1]
     private final Map<Integer, float[]> uvMap = new HashMap<>();
-    private final Map<Integer, Float> widthMap = new HashMap<>();
+    private final Map<Integer, Float> advanceMap = new HashMap<>();
+    private final Map<Integer, Float> drawWidthMap = new HashMap<>();
+    private final Map<Integer, Float> xOffsetMap = new HashMap<>();
     // Track which codepoints are actively being rasterized to avoid duplicate work
     private final ConcurrentHashMap<Integer, Boolean> pendingRenders = new ConcurrentHashMap<>();
 
@@ -59,6 +61,13 @@ public class GlyphCache {
         INSTANCES.clear();
     }
 
+    public static void invalidate(String sourceId) {
+        if (sourceId == null) {
+            return;
+        }
+        INSTANCES.remove(sourceId);
+    }
+
     public static void dumpAllAtlases(File dir) throws IOException {
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IOException("Failed to create atlas dump dir: " + dir);
@@ -73,7 +82,7 @@ public class GlyphCache {
         this.source = source;
         this.textureName = "glyph_cache_" + sanitizeTextureName(source.getId());
         this.atlasImage = new BufferedImage(atlasWidth, atlasHeight, BufferedImage.TYPE_INT_ARGB);
-        this.texture = new GlyphAtlasTexture(this.atlasImage);
+        this.texture = new GlyphAtlasTexture(this.atlasImage, source.usesTextColor());
     }
 
     public ResourceLocation getResourceLocation() {
@@ -108,16 +117,24 @@ public class GlyphCache {
     }
 
     // Returns the advance width of this glyph in display pixels.
-    public float getGlyphWidth(int codepoint) {
-        Float explicitWidth = widthMap.get(codepoint);
-        if (explicitWidth != null) return explicitWidth;
+    public float getGlyphAdvance(int codepoint) {
+        Float explicitAdvance = advanceMap.get(codepoint);
+        if (explicitAdvance != null) return explicitAdvance;
 
-        float measuredAdvance = source.getTextGlyphAdvance(codepoint, RENDER_SIZE);
+        int renderSize = minemoticon$getRenderSize();
+        float measuredAdvance = source.getTextGlyphAdvance(codepoint, renderSize);
         if (measuredAdvance > 0.0f) {
-            float width = measuredAdvance * minemoticon$getDisplayHeight() / RENDER_SIZE;
-            widthMap.put(codepoint, width);
-            return width;
+            float advance = measuredAdvance * minemoticon$getDisplayHeight() / renderSize;
+            advanceMap.put(codepoint, advance);
+            return advance;
         }
+
+        return getGlyphDrawWidth(codepoint);
+    }
+
+    public float getGlyphDrawWidth(int codepoint) {
+        Float drawWidth = drawWidthMap.get(codepoint);
+        if (drawWidth != null) return drawWidth;
 
         float[] uv = uvMap.get(codepoint);
         if (uv == null) return 0;
@@ -125,7 +142,18 @@ public class GlyphCache {
         float texW = uv[2] - uv[0];
         float texH = uv[3] - uv[1];
         if (texH == 0) return minemoticon$getDisplayHeight();
-        return (texW / texH) * minemoticon$getDisplayHeight();
+        drawWidth = (texW / texH) * minemoticon$getDisplayHeight();
+        drawWidthMap.put(codepoint, drawWidth);
+        return drawWidth;
+    }
+
+    public float getGlyphOffsetX(int codepoint) {
+        Float offset = xOffsetMap.get(codepoint);
+        return offset != null ? offset : 0.0f;
+    }
+
+    public int getRenderSize() {
+        return minemoticon$getRenderSize();
     }
 
     public boolean isReady(int codepoint) {
@@ -134,12 +162,14 @@ public class GlyphCache {
 
     private void renderGlyph(int codepoint) {
         boolean preserveLineMetrics = source.preserveTextLineMetrics();
-        BufferedImage glyph = preserveLineMetrics ? source.renderTextGlyph(codepoint, RENDER_SIZE)
-            : source.renderGlyph(codepoint, RENDER_SIZE);
-        float measuredAdvance = source.getTextGlyphAdvance(codepoint, RENDER_SIZE);
+        int renderSize = minemoticon$getRenderSize();
+        BufferedImage glyph = preserveLineMetrics ? source.renderTextGlyph(codepoint, renderSize)
+            : source.renderGlyph(codepoint, renderSize);
+        float measuredAdvance = source.getTextGlyphAdvance(codepoint, renderSize);
         if (measuredAdvance > 0.0f) {
-            widthMap.put(codepoint, measuredAdvance * minemoticon$getDisplayHeight() / RENDER_SIZE);
+            advanceMap.put(codepoint, measuredAdvance * minemoticon$getDisplayHeight() / renderSize);
         }
+        float sourceOffsetX = preserveLineMetrics ? source.getTextGlyphOffsetX(codepoint, renderSize) : 0.0f;
         if (glyph == null) return;
 
         // Compute tight visible bounds
@@ -162,19 +192,25 @@ public class GlyphCache {
             return;
         }
 
-        // Add 1px padding
-        minX = Math.max(0, minX - 1);
-        maxX = Math.min(gw - 1, maxX + 1);
         if (preserveLineMetrics) {
+            minX = Math.max(0, minX - 1);
+            maxX = Math.min(gw - 1, maxX + 1);
             minY = 0;
             maxY = gh - 1;
         } else {
+            // Add 1px padding
+            minX = Math.max(0, minX - 1);
+            maxX = Math.min(gw - 1, maxX + 1);
             minY = Math.max(0, minY - 1);
             maxY = Math.min(gh - 1, maxY + 1);
         }
 
         int cropW = maxX - minX + 1;
         int cropH = maxY - minY + 1;
+        drawWidthMap.put(codepoint, cropH > 0 ? cropW * minemoticon$getDisplayHeight() / cropH : 0.0f);
+        if (preserveLineMetrics) {
+            xOffsetMap.put(codepoint, (sourceOffsetX + minX) * minemoticon$getDisplayHeight() / renderSize);
+        }
 
         synchronized (this) {
             // Check if we need to advance to next row
@@ -241,7 +277,7 @@ public class GlyphCache {
 
         atlasImage = newImage;
         atlasHeight = newHeight;
-        texture = new GlyphAtlasTexture(atlasImage);
+        texture = new GlyphAtlasTexture(atlasImage, source.usesTextColor());
         if (registered) {
             resourceLocation = net.minecraft.client.Minecraft.getMinecraft()
                 .getTextureManager()
@@ -250,7 +286,14 @@ public class GlyphCache {
     }
 
     private float minemoticon$getDisplayHeight() {
-        return source.preserveTextLineMetrics() ? EmojiConfig.getFontStackTextDisplayHeight() : DEFAULT_DISPLAY_HEIGHT;
+        return source.getDisplayHeight();
+    }
+
+    private int minemoticon$getRenderSize() {
+        if (source.preserveTextLineMetrics()) {
+            return Math.max(TEXT_RENDER_SIZE, Math.round(minemoticon$getDisplayHeight() * 4.0f));
+        }
+        return DEFAULT_RENDER_SIZE;
     }
 
     private static String sanitizeTextureName(String sourceId) {
@@ -267,8 +310,16 @@ public class GlyphCache {
 
     static class GlyphAtlasTexture extends DynamicTexture {
 
+        private final boolean textSource;
+
         GlyphAtlasTexture(BufferedImage image) {
             super(image);
+            this.textSource = false;
+        }
+
+        GlyphAtlasTexture(BufferedImage image, boolean textSource) {
+            super(image);
+            this.textSource = textSource;
         }
 
         void markDirty(BufferedImage image) {

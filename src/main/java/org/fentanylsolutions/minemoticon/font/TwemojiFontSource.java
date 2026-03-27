@@ -2,6 +2,7 @@ package org.fentanylsolutions.minemoticon.font;
 
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.util.Map;
 
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.colorfont.AtlasBuilder;
@@ -15,13 +16,24 @@ public class TwemojiFontSource extends FontSource {
 
     private final ColorFont colorFont;
     private final String fontHash;
+    private final Float displayHeightOverride;
+    private final float widthScale;
+    private final float verticalOffset;
 
-    public TwemojiFontSource(ColorFont colorFont, String fontHash) {
+    public TwemojiFontSource(ColorFont colorFont, String fontHash, Float displayHeightOverride, float widthScale,
+        float verticalOffset) {
         this.colorFont = colorFont;
         this.fontHash = fontHash;
+        this.displayHeightOverride = displayHeightOverride;
+        this.widthScale = widthScale;
+        this.verticalOffset = verticalOffset;
     }
 
     public static TwemojiFontSource load() {
+        return load(java.util.Collections.emptyMap());
+    }
+
+    public static TwemojiFontSource load(Map<String, Float> settings) {
         try (var stream = TwemojiFontSource.class.getResourceAsStream(RESOURCE_PATH)) {
             if (stream == null) {
                 Minemoticon.LOG.warn("Bundled twemoji.ttf not found in jar");
@@ -34,7 +46,12 @@ public class TwemojiFontSource extends FontSource {
             byte[] bytes = baos.toByteArray();
             ColorFont font = ColorFont.load(new ByteArrayInputStream(bytes));
             String hash = AtlasBuilder.sha1(bytes);
-            return new TwemojiFontSource(font, hash);
+            return new TwemojiFontSource(
+                font,
+                hash,
+                FontVariationConfig.getExplicitDisplayHeight(settings),
+                FontVariationConfig.getWidthScale(settings, FontVariationConfig.DEFAULT_WIDTH_PERCENT),
+                FontVariationConfig.getVerticalOffset(settings, FontVariationConfig.DEFAULT_Y_OFFSET));
         } catch (Exception e) {
             Minemoticon.LOG.warn("Failed to load bundled twemoji font", e);
             return null;
@@ -84,5 +101,20 @@ public class TwemojiFontSource extends FontSource {
     @Override
     public String getFontHash() {
         return fontHash;
+    }
+
+    @Override
+    public float getDisplayHeight() {
+        return displayHeightOverride != null ? displayHeightOverride.floatValue() : super.getDisplayHeight();
+    }
+
+    @Override
+    public float getWidthScale() {
+        return widthScale;
+    }
+
+    @Override
+    public float getVerticalOffset() {
+        return verticalOffset;
     }
 }

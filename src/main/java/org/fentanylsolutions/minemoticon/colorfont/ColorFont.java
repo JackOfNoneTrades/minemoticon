@@ -7,6 +7,7 @@ import java.awt.RenderingHints;
 import java.awt.Shape;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphVector;
+import java.awt.font.TextAttribute;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.GeneralPath;
 import java.awt.geom.Rectangle2D;
@@ -15,7 +16,10 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 // Renders colored emoji glyphs from a COLR/CPAL OpenType font.
 // Self-contained, no Minecraft dependencies -- can be moved to a library.
@@ -29,14 +33,15 @@ public class ColorFont {
     private final SvgParser svg; // null if no SVG table
     private final org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype; // null if FreeType unavailable
     private final Font shapingFont; // null if AWT couldn't load the font for GSUB shaping
+    private final List<VariationAxis> variationAxes;
     private final int unitsPerEm;
     private final int ascent;
     private final int descent;
-    private static final FontRenderContext SHAPING_CONTEXT = new FontRenderContext(new AffineTransform(), true, true);
+    private static final FontRenderContext SHAPING_CONTEXT = new FontRenderContext(new AffineTransform(), true, false);
 
     private ColorFont(CmapParser cmap, ColrParser colr, CpalParser cpal, GlyfParser glyf, CbdtParser cbdt,
         SvgParser svg, org.fentanylsolutions.minemoticon.freetype.FreeTypeRenderer freetype, Font shapingFont,
-        int unitsPerEm, int ascent, int descent) {
+        List<VariationAxis> variationAxes, int unitsPerEm, int ascent, int descent) {
         this.cmap = cmap;
         this.colr = colr;
         this.cpal = cpal;
@@ -45,12 +50,17 @@ public class ColorFont {
         this.svg = svg;
         this.freetype = freetype;
         this.shapingFont = shapingFont;
+        this.variationAxes = variationAxes;
         this.unitsPerEm = unitsPerEm;
         this.ascent = ascent;
         this.descent = descent;
     }
 
     public static ColorFont load(InputStream in) throws IOException {
+        return load(in, Collections.emptyMap());
+    }
+
+    public static ColorFont load(InputStream in, Map<String, Float> variationSettings) throws IOException {
         var reader = OTFTableReader.load(in);
 
         if (!reader.hasTable("cmap")) {
@@ -107,10 +117,16 @@ public class ColorFont {
             svgTable = new SvgParser(reader.getTable("SVG "), head.unitsPerEm, head.ascent, head.descent);
         }
 
+        List<VariationAxis> variationAxes = Collections.emptyList();
+        if (reader.hasTable("fvar")) {
+            variationAxes = new FvarParser(reader.getTable("fvar")).getAxes();
+        }
+
         Font awtShapingFont = null;
         try {
             awtShapingFont = Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(reader.getFontData()))
                 .deriveFont((float) head.unitsPerEm);
+            awtShapingFont = applyVariationSettings(awtShapingFont, variationAxes, variationSettings);
         } catch (Exception ignored) {}
 
         return new ColorFont(
@@ -122,9 +138,14 @@ public class ColorFont {
             svgTable,
             ftRenderer,
             awtShapingFont,
+            variationAxes,
             head.unitsPerEm,
             head.ascent,
             head.descent);
+    }
+
+    public List<VariationAxis> getVariationAxes() {
+        return variationAxes;
     }
 
     public boolean hasAnyColorGlyphs() {
@@ -259,15 +280,12 @@ public class ColorFont {
         g2d.setColor(Color.WHITE);
 
         var transform = new AffineTransform();
-        double baseline = pad + this.ascent * scale;
-        transform.translate(pad - minX * scale, baseline);
+        double baseline = Math.rint(pad + this.ascent * scale);
+        double translateX = Math.rint(pad - minX * scale);
+        transform.translate(translateX, baseline);
         transform.scale(scale, scale);
         Shape scaledOutline = transform.createTransformedShape(outline);
         g2d.fill(scaledOutline);
-        if (size <= 48) {
-            var embolden = AffineTransform.getTranslateInstance(Math.max(0.5d, scale * 20.0d), 0.0d);
-            g2d.fill(embolden.createTransformedShape(scaledOutline));
-        }
         g2d.dispose();
         return result;
     }
@@ -283,6 +301,73 @@ public class ColorFont {
         double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
         return (float) (glyphVector.getGlyphMetrics(0)
             .getAdvanceX() * scale);
+    }
+
+    public float getTextGlyphOffsetX(int codepoint, int size) {
+        if (shapingFont == null) return 0.0f;
+
+        GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
+        if (glyphVector == null) return 0.0f;
+
+        Shape outline = glyphVector.getGlyphOutline(0);
+        Rectangle2D bounds = outline.getBounds2D();
+        if (bounds == null || bounds.isEmpty()) {
+            return 0.0f;
+        }
+
+        float pad = Math.max(1.0f, size * 0.03125f);
+        double metricHeight = Math.max(1.0d, this.ascent - this.descent);
+        double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+        double minX = Math.min(0.0d, bounds.getX());
+        double translateX = Math.rint(pad - minX * scale);
+        return (float) (-translateX);
+    }
+
+    public org.fentanylsolutions.minemoticon.font.TextRunLayout layoutTextRun(String text, int size) {
+        if (shapingFont == null || text == null || text.isEmpty()) return null;
+
+        GlyphVector glyphVector = shapingFont
+            .layoutGlyphVector(SHAPING_CONTEXT, text.toCharArray(), 0, text.length(), Font.LAYOUT_LEFT_TO_RIGHT);
+        int codepointCount = text.codePointCount(0, text.length());
+        if (glyphVector.getNumGlyphs() != codepointCount) {
+            return null;
+        }
+
+        int[] charStarts = new int[codepointCount];
+        int cpIndex = 0;
+        for (int i = 0; i < text.length();) {
+            charStarts[cpIndex++] = i;
+            i += Character.charCount(text.codePointAt(i));
+        }
+
+        int[] glyphByChar = new int[text.length()];
+        java.util.Arrays.fill(glyphByChar, -1);
+        for (int glyphIndex = 0; glyphIndex < glyphVector.getNumGlyphs(); glyphIndex++) {
+            int charIndex = glyphVector.getGlyphCharIndex(glyphIndex);
+            if (charIndex >= 0 && charIndex < glyphByChar.length && glyphByChar[charIndex] == -1) {
+                glyphByChar[charIndex] = glyphIndex;
+            }
+        }
+
+        float pad = Math.max(1.0f, size * 0.03125f);
+        double metricHeight = Math.max(1.0d, this.ascent - this.descent);
+        double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+        float[] penPositions = new float[codepointCount];
+        int previousGlyph = -1;
+
+        for (int i = 0; i < codepointCount; i++) {
+            int glyphIndex = glyphByChar[charStarts[i]];
+            if (glyphIndex < 0 || glyphIndex == previousGlyph) {
+                return null;
+            }
+            penPositions[i] = (float) (glyphVector.getGlyphPosition(glyphIndex)
+                .getX() * scale);
+            previousGlyph = glyphIndex;
+        }
+
+        float totalAdvance = (float) (glyphVector.getGlyphPosition(glyphVector.getNumGlyphs())
+            .getX() * scale);
+        return new org.fentanylsolutions.minemoticon.font.TextRunLayout(penPositions, totalAdvance);
     }
 
     private GlyphVector layoutSingleGlyphVector(int codepoint) {
@@ -463,5 +548,68 @@ public class ColorFont {
         g2d.setRenderingHint(RenderingHints.KEY_COLOR_RENDERING, RenderingHints.VALUE_COLOR_RENDER_QUALITY);
         g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
         g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+    }
+
+    public static Font applyVariationSettings(Font baseFont, List<VariationAxis> variationAxes,
+        Map<String, Float> variationSettings) {
+        if (baseFont == null || variationAxes == null
+            || variationAxes.isEmpty()
+            || variationSettings == null
+            || variationSettings.isEmpty()) {
+            return baseFont;
+        }
+
+        Map<String, VariationAxis> axisByTag = new HashMap<>();
+        for (VariationAxis axis : variationAxes) {
+            axisByTag.put(axis.getTag(), axis);
+        }
+
+        Map<TextAttribute, Object> attrs = new HashMap<>(baseFont.getAttributes());
+        boolean changed = false;
+
+        VariationAxis weightAxis = axisByTag.get("wght");
+        if (weightAxis != null && variationSettings.containsKey("wght")) {
+            float value = clamp(variationSettings.get("wght"), weightAxis.getMinValue(), weightAxis.getMaxValue());
+            attrs.put(TextAttribute.WEIGHT, clamp(value / 400.0f, 0.5f, 2.75f));
+            changed = true;
+        }
+
+        VariationAxis widthAxis = axisByTag.get("wdth");
+        if (widthAxis != null && variationSettings.containsKey("wdth")) {
+            float value = clamp(variationSettings.get("wdth"), widthAxis.getMinValue(), widthAxis.getMaxValue());
+            attrs.put(TextAttribute.WIDTH, clamp(value / 100.0f, 0.5f, 2.0f));
+            changed = true;
+        }
+
+        attrs.put(TextAttribute.KERNING, TextAttribute.KERNING_ON);
+        changed = true;
+
+        float posture = TextAttribute.POSTURE_REGULAR;
+        boolean postureChanged = false;
+
+        VariationAxis italicAxis = axisByTag.get("ital");
+        if (italicAxis != null && variationSettings.containsKey("ital")) {
+            float value = clamp(variationSettings.get("ital"), italicAxis.getMinValue(), italicAxis.getMaxValue());
+            posture = value >= 0.5f ? TextAttribute.POSTURE_OBLIQUE : TextAttribute.POSTURE_REGULAR;
+            postureChanged = true;
+        }
+
+        VariationAxis slantAxis = axisByTag.get("slnt");
+        if (slantAxis != null && variationSettings.containsKey("slnt")) {
+            float value = clamp(variationSettings.get("slnt"), slantAxis.getMinValue(), slantAxis.getMaxValue());
+            posture = Math.max(posture, clamp(Math.abs(value) / 45.0f, 0.0f, TextAttribute.POSTURE_OBLIQUE));
+            postureChanged = true;
+        }
+
+        if (postureChanged) {
+            attrs.put(TextAttribute.POSTURE, posture);
+            changed = true;
+        }
+
+        return changed ? baseFont.deriveFont(attrs) : baseFont;
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
     }
 }

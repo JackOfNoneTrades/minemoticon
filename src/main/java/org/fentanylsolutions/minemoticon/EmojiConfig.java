@@ -35,6 +35,10 @@ public class EmojiConfig {
     @Config.DefaultStringList({ "twemoji", "minecraft" })
     public static String[] fontStack;
 
+    @Config.Comment("Per-font display/variation overrides in the form 'fontId|size=10;axis=value'")
+    @Config.DefaultStringList({})
+    public static String[] fontVariationSettings;
+
     @Config.Comment("Display height in pixels for stack-rendered text glyphs from non-Minecraft fonts")
     @Config.DefaultInt(10)
     @Config.RangeInt(min = 8, max = 16)

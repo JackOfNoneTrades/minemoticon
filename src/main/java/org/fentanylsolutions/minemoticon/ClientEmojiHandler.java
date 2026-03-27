@@ -25,6 +25,7 @@ import org.fentanylsolutions.minemoticon.colorfont.EmojiAtlas;
 import org.fentanylsolutions.minemoticon.font.CustomFontSource;
 import org.fentanylsolutions.minemoticon.font.FontSource;
 import org.fentanylsolutions.minemoticon.font.FontStack;
+import org.fentanylsolutions.minemoticon.font.FontVariationConfig;
 import org.fentanylsolutions.minemoticon.font.MinecraftFontSource;
 import org.fentanylsolutions.minemoticon.font.TwemojiFontSource;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
@@ -61,6 +62,7 @@ public class ClientEmojiHandler {
     public static boolean error = false;
     private static volatile boolean ready = false;
     private static FontStack fontStack;
+    private static final ThreadLocal<FontStack> FONT_STACK_OVERRIDE = new ThreadLocal<>();
     // All loaded font sources (enabled + available), for the GUI
     private static List<FontSource> allSources = new ArrayList<>();
     private static EmojiAtlas emojiAtlas;
@@ -70,7 +72,26 @@ public class ClientEmojiHandler {
     }
 
     public static FontStack getFontStack() {
-        return fontStack;
+        FontStack override = FONT_STACK_OVERRIDE.get();
+        return override != null ? override : fontStack;
+    }
+
+    public static FontStack pushFontStackOverride(FontStack override) {
+        FontStack previous = FONT_STACK_OVERRIDE.get();
+        if (override == null) {
+            FONT_STACK_OVERRIDE.remove();
+        } else {
+            FONT_STACK_OVERRIDE.set(override);
+        }
+        return previous;
+    }
+
+    public static void popFontStackOverride(FontStack previous) {
+        if (previous == null) {
+            FONT_STACK_OVERRIDE.remove();
+        } else {
+            FONT_STACK_OVERRIDE.set(previous);
+        }
     }
 
     public static List<FontSource> getAllSources() {
@@ -208,8 +229,11 @@ public class ClientEmojiHandler {
         sources.add(mcSource);
         sourceById.put(mcSource.getId(), mcSource);
 
+        Map<String, Map<String, Float>> variationSettings = FontVariationConfig
+            .parse(EmojiConfig.fontVariationSettings);
+
         // Built-in: Twemoji
-        var twemojiSource = TwemojiFontSource.load();
+        var twemojiSource = TwemojiFontSource.load(variationSettings.get(TwemojiFontSource.ID));
         if (twemojiSource != null) {
             sources.add(twemojiSource);
             sourceById.put(twemojiSource.getId(), twemojiSource);
@@ -224,7 +248,7 @@ public class ClientEmojiHandler {
                     f -> f.getName()
                         .toLowerCase()));
             for (File file : fontFiles) {
-                var custom = CustomFontSource.load(file);
+                var custom = CustomFontSource.load(file, variationSettings.get(file.getName()));
                 if (custom != null) {
                     sources.add(custom);
                     sourceById.put(custom.getId(), custom);

@@ -6,6 +6,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.util.ScreenShotHelper;
 
+import org.fentanylsolutions.minemoticon.config.FontSelectionScreen;
 import org.fentanylsolutions.minemoticon.config.MinemoticonGuiConfig;
 import org.fentanylsolutions.minemoticon.font.GlyphCache;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
@@ -23,8 +24,9 @@ public class ClientProxy extends CommonProxy {
 
     private static final boolean DEV_AUTO_CAPTURE = minemoticon$isEnabled("MINEMOTICON_DEV_CAPTURE");
     private static final int DEV_CAPTURE_DELAY_TICKS = 20;
-    private static final boolean DEV_CAPTURE_CONFIG = !"mainmenu"
-        .equalsIgnoreCase(System.getenv("MINEMOTICON_DEV_CAPTURE_TARGET"));
+    private static final String DEV_CAPTURE_TARGET = System.getenv("MINEMOTICON_DEV_CAPTURE_TARGET");
+    private static final boolean DEV_CAPTURE_CONFIG = !"mainmenu".equalsIgnoreCase(DEV_CAPTURE_TARGET);
+    private static final boolean DEV_CAPTURE_FONT_POPUP = "fontpopup".equalsIgnoreCase(DEV_CAPTURE_TARGET);
 
     private boolean minemoticon$devCaptureOpenedConfig;
     private boolean minemoticon$devCaptureComplete;
@@ -108,7 +110,24 @@ public class ClientProxy extends CommonProxy {
             return;
         }
 
-        if (DEV_CAPTURE_CONFIG && !(mc.currentScreen instanceof MinemoticonGuiConfig)) {
+        if (DEV_CAPTURE_FONT_POPUP) {
+            if (mc.currentScreen instanceof MinemoticonGuiConfig) {
+                mc.displayGuiScreen(new FontSelectionScreen(mc.currentScreen));
+                minemoticon$devCaptureTicks = 0;
+                return;
+            }
+            if (mc.currentScreen instanceof FontSelectionScreen) {
+                ((FontSelectionScreen) mc.currentScreen).openFirstSettingsPopupForDevCapture();
+                minemoticon$devCaptureTicks = 0;
+                return;
+            }
+            if (mc.currentScreen == null || !"FontSettingsScreen".equals(
+                mc.currentScreen.getClass()
+                    .getSimpleName())) {
+                minemoticon$devCaptureTicks = 0;
+                return;
+            }
+        } else if (DEV_CAPTURE_CONFIG && !(mc.currentScreen instanceof MinemoticonGuiConfig)) {
             minemoticon$devCaptureTicks = 0;
             return;
         }
