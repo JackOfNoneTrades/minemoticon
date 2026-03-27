@@ -112,6 +112,14 @@ public class FreeTypeRenderer implements AutoCloseable {
             return cached;
         }
 
+        // Check that the codepoint is actually mapped in the font (not .notdef).
+        // Without this, FreeType renders the .notdef glyph for unmapped characters
+        // and we'd incorrectly claim we can render them.
+        if (face.getCharIndex(codepoint) == 0) {
+            renderableGlyphCache.put(codepoint, false);
+            return false;
+        }
+
         boolean renderable = loadGlyphBitmap(codepoint, PROBE_RENDER_SIZE) != null;
         renderableGlyphCache.put(codepoint, renderable);
         return renderable;

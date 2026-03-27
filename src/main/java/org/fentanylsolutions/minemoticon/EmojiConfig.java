@@ -31,11 +31,20 @@ public class EmojiConfig {
     @Config.DefaultBoolean(true)
     public static boolean checkForEmojiUpdates;
 
-    @Config.Comment("Emoji font filename in config/minemoticon/fonts/ (empty = bundled Twemoji)")
-    @Config.DefaultString("")
-    public static String emojiFont;
+    @Config.Comment("Ordered list of enabled font source IDs, first = highest priority. IDs: 'minecraft', 'twemoji', or a font filename.")
+    @Config.DefaultStringList({ "twemoji", "minecraft" })
+    public static String[] fontStack;
+
+    @Config.Comment("Display height in pixels for stack-rendered text glyphs from non-Minecraft fonts")
+    @Config.DefaultInt(10)
+    @Config.RangeInt(min = 8, max = 16)
+    public static int fontStackTextDisplayHeight;
 
     @Config.Comment("Enable debug logging")
     @Config.DefaultBoolean(false)
     public static boolean debugMode;
+
+    public static float getFontStackTextDisplayHeight() {
+        return Math.max(8.0f, Math.min(16.0f, (float) fontStackTextDisplayHeight));
+    }
 }

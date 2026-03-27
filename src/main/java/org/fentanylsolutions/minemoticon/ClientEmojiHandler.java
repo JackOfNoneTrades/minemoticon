@@ -22,6 +22,11 @@ import org.fentanylsolutions.minemoticon.api.EmojiFromTwitmoji;
 import org.fentanylsolutions.minemoticon.colorfont.AtlasBuilder;
 import org.fentanylsolutions.minemoticon.colorfont.ColorFont;
 import org.fentanylsolutions.minemoticon.colorfont.EmojiAtlas;
+import org.fentanylsolutions.minemoticon.font.CustomFontSource;
+import org.fentanylsolutions.minemoticon.font.FontSource;
+import org.fentanylsolutions.minemoticon.font.FontStack;
+import org.fentanylsolutions.minemoticon.font.MinecraftFontSource;
+import org.fentanylsolutions.minemoticon.font.TwemojiFontSource;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 
@@ -55,20 +60,29 @@ public class ClientEmojiHandler {
     public static final Map<String, Emoji> PACK_CATEGORY_ICONS = new HashMap<>();
     public static boolean error = false;
     private static volatile boolean ready = false;
-    private static ColorFont colorFont; // user-selected or bundled
-    private static ColorFont bundledFont; // always loaded as fallback
+    private static FontStack fontStack;
+    // All loaded font sources (enabled + available), for the GUI
+    private static List<FontSource> allSources = new ArrayList<>();
     private static EmojiAtlas emojiAtlas;
-    private static String fontHash;
 
     public static boolean isReady() {
         return ready;
     }
 
+    public static FontStack getFontStack() {
+        return fontStack;
+    }
+
+    public static List<FontSource> getAllSources() {
+        return allSources;
+    }
+
     public static void setup() {
-        // Load color font for stock emoji rendering
-        loadColorFont();
+        // Load font stack for rendering
+        loadFontStack();
 
         // Clean stale atlas caches from previous font versions
+        String fontHash = fontStack != null ? fontStack.getEmojiFontHash() : null;
         if (fontHash != null) {
             AtlasBuilder.cleanStaleCaches(fontHash);
         }
@@ -102,16 +116,14 @@ public class ClientEmojiHandler {
         }
     }
 
-    public static void reloadFont() {
-        // Clear all stock emojis and reload with new font
+    public static void reloadFontStack() {
+        // Clear all stock emojis and reload with new font stack
         clearTwemojiData();
-        colorFont = null;
         emojiAtlas = null;
-        fontHash = null;
-        // Reset atlas registration
         org.fentanylsolutions.minemoticon.api.EmojiFromAtlas.resetAtlasRegistration();
+        org.fentanylsolutions.minemoticon.font.GlyphCache.invalidateAll();
 
-        loadColorFont();
+        loadFontStack();
 
         if (EmojiConfig.enableTwemoji) {
             String localData = loadLocalEmojiJson();
@@ -121,7 +133,7 @@ public class ClientEmojiHandler {
         }
 
         buildPickerData();
-        Minemoticon.LOG.info("Reloaded font, {} emojis", EMOJI_LIST.size());
+        Minemoticon.LOG.info("Reloaded font stack, {} emojis", EMOJI_LIST.size());
     }
 
     public static void reloadPacks() {
@@ -184,47 +196,71 @@ public class ClientEmojiHandler {
 
     public static final File FONTS_DIR = new File("config/minemoticon/fonts");
 
-    private static void loadColorFont() {
+    private static void loadFontStack() {
         FONTS_DIR.mkdirs();
 
-        // Always load bundled twemoji as fallback
-        try (var stream = ClientEmojiHandler.class.getResourceAsStream("/assets/minemoticon/twemoji.ttf")) {
-            if (stream != null) {
-                var baos = new java.io.ByteArrayOutputStream();
-                byte[] buf = new byte[8192];
-                int n;
-                while ((n = stream.read(buf)) != -1) baos.write(buf, 0, n);
-                byte[] bundledBytes = baos.toByteArray();
-                bundledFont = ColorFont.load(new java.io.ByteArrayInputStream(bundledBytes));
+        // Build all available font sources
+        var sources = new ArrayList<FontSource>();
+        var sourceById = new HashMap<String, FontSource>();
 
-                // Default: use bundled as primary
-                colorFont = bundledFont;
-                fontHash = AtlasBuilder.sha1(bundledBytes);
-            }
-        } catch (Exception e) {
-            Minemoticon.LOG.warn("Failed to load bundled twemoji font", e);
+        // Built-in: Minecraft
+        var mcSource = new MinecraftFontSource();
+        sources.add(mcSource);
+        sourceById.put(mcSource.getId(), mcSource);
+
+        // Built-in: Twemoji
+        var twemojiSource = TwemojiFontSource.load();
+        if (twemojiSource != null) {
+            sources.add(twemojiSource);
+            sourceById.put(twemojiSource.getId(), twemojiSource);
         }
 
-        // Load user-selected font if configured
-        if (EmojiConfig.emojiFont != null && !EmojiConfig.emojiFont.isEmpty()) {
-            try {
-                var userFontFile = new File(FONTS_DIR, EmojiConfig.emojiFont);
-                if (userFontFile.isFile()) {
-                    byte[] userBytes = java.nio.file.Files.readAllBytes(userFontFile.toPath());
-                    colorFont = ColorFont.load(new java.io.ByteArrayInputStream(userBytes));
-                    fontHash = AtlasBuilder.sha1(userBytes);
-                    Minemoticon.LOG.info("Using user emoji font: {}", EmojiConfig.emojiFont);
-                } else {
-                    Minemoticon.LOG.warn("Configured emoji font not found: {}", EmojiConfig.emojiFont);
+        // Custom fonts from fonts directory
+        File[] fontFiles = FONTS_DIR.listFiles(f -> f.isFile() && isSupportedFontFile(f.getName()));
+        if (fontFiles != null) {
+            java.util.Arrays.sort(
+                fontFiles,
+                Comparator.comparing(
+                    f -> f.getName()
+                        .toLowerCase()));
+            for (File file : fontFiles) {
+                var custom = CustomFontSource.load(file);
+                if (custom != null) {
+                    sources.add(custom);
+                    sourceById.put(custom.getId(), custom);
                 }
-            } catch (Exception e) {
-                Minemoticon.LOG.warn("Failed to load user font {}, using bundled", EmojiConfig.emojiFont, e);
             }
         }
 
-        if (colorFont != null) {
-            Minemoticon.LOG.info("Loaded emoji font (hash: {})", fontHash);
+        allSources = sources;
+
+        // Build enabled list from config order
+        var enabled = new ArrayList<FontSource>();
+        if (EmojiConfig.fontStack != null) {
+            for (String id : EmojiConfig.fontStack) {
+                FontSource source = sourceById.get(id);
+                if (source != null) {
+                    enabled.add(source);
+                }
+            }
         }
+
+        // Fallback: if nothing is enabled, use defaults
+        if (enabled.isEmpty()) {
+            if (twemojiSource != null) enabled.add(twemojiSource);
+            enabled.add(mcSource);
+        }
+
+        fontStack = new FontStack(enabled);
+        Minemoticon.LOG.info(
+            "Loaded font stack: {} sources enabled, emoji font hash: {}",
+            enabled.size(),
+            fontStack.getEmojiFontHash());
+    }
+
+    private static boolean isSupportedFontFile(String name) {
+        String lower = name.toLowerCase();
+        return lower.endsWith(".ttf") || lower.endsWith(".otf");
     }
 
     private static final String EMOJI_JSON_URL = "https://raw.githubusercontent.com/iamcal/emoji-data/master/emoji.json";
@@ -330,7 +366,11 @@ public class ClientEmojiHandler {
                     }
                 }
                 // Pass both fonts to atlas builder -- it tries primary first, falls back to bundled
-                emojiAtlas = AtlasBuilder.loadOrBuild(colorFont, bundledFont, fontHash, glyphEntries);
+                emojiAtlas = AtlasBuilder.loadOrBuild(
+                    fontStack.getEmojiFont(),
+                    fontStack.getEmojiFallbackFont(),
+                    fontStack.getEmojiFontHash(),
+                    glyphEntries);
             }
 
             // Second pass: create emoji objects
@@ -441,30 +481,33 @@ public class ClientEmojiHandler {
     }
 
     private static boolean shouldUseAtlas() {
-        if (colorFont == null || fontHash == null) return false;
-        // Custom fonts are routed through per-glyph textures for compatibility.
-        return EmojiConfig.emojiFont == null || EmojiConfig.emojiFont.isEmpty();
+        if (fontStack == null || fontStack.getEmojiFontHash() == null) return false;
+        return fontStack.isPrimaryEmojiTwemoji();
     }
 
     private static ColorFont pickFontForGlyph(int[] codepoints) {
-        if (colorFont != null && colorFont.canRender(codepoints)) return colorFont;
-        if (bundledFont != null && bundledFont != colorFont && bundledFont.canRender(codepoints)) return bundledFont;
+        if (fontStack == null) return null;
+        ColorFont primary = fontStack.getEmojiFont();
+        ColorFont fallback = fontStack.getEmojiFallbackFont();
+        if (primary != null && primary.canRender(codepoints)) return primary;
+        if (fallback != null && fallback.canRender(codepoints)) return fallback;
         return null;
     }
 
     private static ColorFont pickPrimaryFontForGlyph(int[] codepoints) {
-        if (colorFont != null && colorFont.canRender(codepoints)) return colorFont;
-        if (bundledFont != null && bundledFont.canRender(codepoints)) return bundledFont;
+        if (fontStack == null) return null;
+        ColorFont primary = fontStack.getEmojiFont();
+        if (primary != null && primary.canRender(codepoints)) return primary;
+        ColorFont fallback = fontStack.getEmojiFallbackFont();
+        if (fallback != null && fallback.canRender(codepoints)) return fallback;
         return null;
     }
 
     private static ColorFont pickFallbackFontForGlyph(int[] codepoints, ColorFont primaryFont) {
-        if (bundledFont != null && bundledFont != primaryFont && bundledFont.canRender(codepoints)) return bundledFont;
+        if (fontStack == null) return null;
+        ColorFont fallback = fontStack.getEmojiFallbackFont();
+        if (fallback != null && fallback != primaryFont && fallback.canRender(codepoints)) return fallback;
         return null;
-    }
-
-    private static boolean canRenderGlyph(int[] codepoints) {
-        return pickFontForGlyph(codepoints) != null;
     }
 
     private static boolean isStockEmoji(Emoji e) {

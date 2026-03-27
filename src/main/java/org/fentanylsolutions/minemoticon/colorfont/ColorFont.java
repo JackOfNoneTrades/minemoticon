@@ -4,6 +4,7 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.font.FontRenderContext;
 import java.awt.font.GlyphVector;
 import java.awt.geom.AffineTransform;
@@ -226,6 +227,83 @@ public class ColorFont {
         return null;
     }
 
+    public BufferedImage renderTextGlyph(int codepoint, int size) {
+        if (shapingFont == null) return renderGlyph(codepoint, size);
+
+        GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
+        if (glyphVector == null) return null;
+
+        Shape outline = glyphVector.getGlyphOutline(0);
+        Rectangle2D bounds = outline.getBounds2D();
+        float advance = getTextGlyphAdvance(codepoint, size);
+        if ((bounds == null || bounds.isEmpty()) && advance <= 0.0f) {
+            return null;
+        }
+
+        float pad = Math.max(1.0f, size * 0.03125f);
+        double metricHeight = Math.max(1.0d, this.ascent - this.descent);
+        double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+
+        double minX = bounds != null ? Math.min(0.0d, bounds.getX()) : 0.0d;
+        double maxX = bounds != null && !bounds.isEmpty() ? Math.max(
+            bounds.getMaxX(),
+            glyphVector.getGlyphPosition(1)
+                .getX())
+            : glyphVector.getGlyphPosition(1)
+                .getX();
+        int width = Math.max(1, (int) Math.ceil((maxX - minX) * scale + pad * 2.0d));
+
+        BufferedImage result = new BufferedImage(width, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = result.createGraphics();
+        applyQualityHints(g2d);
+        g2d.setColor(Color.WHITE);
+
+        var transform = new AffineTransform();
+        double baseline = pad + this.ascent * scale;
+        transform.translate(pad - minX * scale, baseline);
+        transform.scale(scale, scale);
+        Shape scaledOutline = transform.createTransformedShape(outline);
+        g2d.fill(scaledOutline);
+        if (size <= 48) {
+            var embolden = AffineTransform.getTranslateInstance(Math.max(0.5d, scale * 20.0d), 0.0d);
+            g2d.fill(embolden.createTransformedShape(scaledOutline));
+        }
+        g2d.dispose();
+        return result;
+    }
+
+    public float getTextGlyphAdvance(int codepoint, int size) {
+        if (shapingFont == null) return -1.0f;
+
+        GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
+        if (glyphVector == null) return -1.0f;
+
+        float pad = Math.max(1.0f, size * 0.03125f);
+        double metricHeight = Math.max(1.0d, this.ascent - this.descent);
+        double scale = Math.max(0.01d, (size - pad * 2.0d) / metricHeight);
+        return (float) (glyphVector.getGlyphMetrics(0)
+            .getAdvanceX() * scale);
+    }
+
+    private GlyphVector layoutSingleGlyphVector(int codepoint) {
+        if (shapingFont == null) return null;
+
+        String text = new String(Character.toChars(codepoint));
+        GlyphVector glyphVector = shapingFont
+            .layoutGlyphVector(SHAPING_CONTEXT, text.toCharArray(), 0, text.length(), Font.LAYOUT_LEFT_TO_RIGHT);
+
+        if (glyphVector.getNumGlyphs() == 0) {
+            return null;
+        }
+
+        int glyphCode = glyphVector.getGlyphCode(0);
+        int missingGlyph = shapingFont.getMissingGlyphCode();
+        if (glyphCode == missingGlyph && codepoint != ' ') {
+            return null;
+        }
+        return glyphVector;
+    }
+
     private int findRenderableSequenceGlyphId(int[] codepoints) {
         if (shapingFont == null || codepoints.length == 0) return 0;
 
@@ -363,7 +441,7 @@ public class ColorFont {
                 Rectangle2D outlineBounds = outline.getBounds2D();
                 if (!outlineBounds.isEmpty()) {
                     outlines.add(outline);
-                    colors.add(Color.BLACK);
+                    colors.add(Color.WHITE);
                     bounds = unionBounds(bounds, outlineBounds);
                 }
             }

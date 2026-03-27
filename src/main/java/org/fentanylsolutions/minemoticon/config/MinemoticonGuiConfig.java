@@ -31,7 +31,7 @@ public class MinemoticonGuiConfig extends SimpleGuiConfig {
         int gap = 4;
         int btnW = (totalW - gap * 2) / 3;
 
-        this.buttonList.add(new GuiButton(BTN_SELECT_FONT, x, btnY, btnW, 20, "\uD83C\uDFA8 Emoji Font"));
+        this.buttonList.add(new GuiButton(BTN_SELECT_FONT, x, btnY, btnW, 20, "\uD83C\uDFA8 Font Stack"));
         x += btnW + gap;
         this.buttonList.add(new GuiButton(BTN_SERVER_EMOJIS, x, btnY, btnW, 20, "\u2601 Server Cache"));
         x += btnW + gap;
