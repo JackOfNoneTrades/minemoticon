@@ -107,11 +107,18 @@ public class GlyphCache {
         }
     }
 
-    // Returns the advance width of this glyph in display pixels (8px scale).
-    // Returns 0 if not yet rendered.
+    // Returns the advance width of this glyph in display pixels.
     public float getGlyphWidth(int codepoint) {
         Float explicitWidth = widthMap.get(codepoint);
         if (explicitWidth != null) return explicitWidth;
+
+        float measuredAdvance = source.getTextGlyphAdvance(codepoint, RENDER_SIZE);
+        if (measuredAdvance > 0.0f) {
+            float width = measuredAdvance * minemoticon$getDisplayHeight() / RENDER_SIZE;
+            widthMap.put(codepoint, width);
+            return width;
+        }
+
         float[] uv = uvMap.get(codepoint);
         if (uv == null) return 0;
         // Width from UV ratio * display height.

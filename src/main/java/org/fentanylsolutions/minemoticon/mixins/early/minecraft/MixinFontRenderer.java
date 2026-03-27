@@ -109,26 +109,29 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         if (ClientEmojiHandler.getFontStack() == null) return;
         if (minemoticon$isSplashFontRenderer()) return;
 
-        var segments = EmojiRenderer.parse(text);
-
         minemoticon$measuringWidth = true;
         try {
-            int width = 0;
-            if (segments != null) {
-                for (var seg : segments) {
-                    if (seg instanceof RenderableEmoji) {
-                        width += (int) EmojiRenderer.EMOJI_SIZE;
-                    } else {
-                        width += minemoticon$measureTextSegment((String) seg);
-                    }
-                }
-            } else {
-                width = minemoticon$measureTextSegment(text);
-            }
-            cir.setReturnValue(width);
+            cir.setReturnValue((int) Math.ceil(minemoticon$measureCompatWidthExact(text)));
         } finally {
             minemoticon$measuringWidth = false;
         }
+    }
+
+    @Inject(method = "trimStringToWidth(Ljava/lang/String;IZ)Ljava/lang/String;", at = @At("HEAD"), cancellable = true)
+    private void minemoticon$trimStringToWidthCompat(String text, int width, boolean reverse,
+        CallbackInfoReturnable<String> cir) {
+        if (ClientEmojiHandler.getFontStack() == null) return;
+        if (minemoticon$isSplashFontRenderer()) return;
+
+        cir.setReturnValue(minemoticon$trimStringToWidthCompat(text, width, reverse));
+    }
+
+    @Inject(method = "sizeStringToWidth", at = @At("HEAD"), cancellable = true)
+    private void minemoticon$sizeStringToWidthCompat(String text, int wrapWidth, CallbackInfoReturnable<Integer> cir) {
+        if (ClientEmojiHandler.getFontStack() == null) return;
+        if (minemoticon$isSplashFontRenderer()) return;
+
+        cir.setReturnValue(minemoticon$sizeStringToWidthCompat(text, wrapWidth));
     }
 
     // --- drawString / renderString compat ---
@@ -311,13 +314,13 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
     }
 
     @Unique
-    private int minemoticon$measureTextSegment(String text) {
+    private float minemoticon$measureTextSegmentExact(String text) {
         FontStack stack = ClientEmojiHandler.getFontStack();
         if (stack == null) {
-            return this.getStringWidth(text);
+            return minemoticon$measureVanillaStringWidth(text);
         }
 
-        int width = 0;
+        float width = 0.0f;
         var vanillaBuf = new StringBuilder();
         boolean bold = false;
         int i = 0;
@@ -325,7 +328,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             char c0 = text.charAt(i);
             if (c0 == 167 && i + 1 < text.length()) {
                 if (vanillaBuf.length() > 0) {
-                    width += this.getStringWidth(vanillaBuf.toString());
+                    width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
                     vanillaBuf.setLength(0);
                 }
                 int format = minemoticon$getFormattingIndex(text.charAt(i + 1));
@@ -350,14 +353,14 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
                 vanillaBuf.append(text, i, i + charCount);
             } else {
                 if (vanillaBuf.length() > 0) {
-                    width += this.getStringWidth(vanillaBuf.toString());
+                    width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
                     vanillaBuf.setLength(0);
                 }
                 GlyphCache cache = GlyphCache.forSource(source);
                 float glyphW = cache.getGlyphWidth(cp);
-                int advance = glyphW > 0 ? (int) glyphW : 8;
-                if (bold && advance > 0) {
-                    advance += 1;
+                float advance = glyphW > 0.0f ? glyphW : 8.0f;
+                if (bold && advance > 0.0f) {
+                    advance += 1.0f;
                 }
                 width += advance;
             }
@@ -365,10 +368,164 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         }
 
         if (vanillaBuf.length() > 0) {
-            width += this.getStringWidth(vanillaBuf.toString());
+            width += minemoticon$measureVanillaStringWidth(vanillaBuf.toString());
         }
 
         return width;
+    }
+
+    @Unique
+    private float minemoticon$measureCompatWidthExact(String text) {
+        if (text == null) {
+            return 0.0f;
+        }
+
+        var segments = EmojiRenderer.parse(text);
+        if (segments == null) {
+            return minemoticon$measureTextSegmentExact(text);
+        }
+
+        float width = 0.0f;
+        for (Object seg : segments) {
+            if (seg instanceof RenderableEmoji) {
+                width += EmojiRenderer.EMOJI_SIZE;
+            } else {
+                width += minemoticon$measureTextSegmentExact((String) seg);
+            }
+        }
+        return width;
+    }
+
+    @Unique
+    private int minemoticon$measureVanillaStringWidth(String text) {
+        if (text == null) {
+            return 0;
+        }
+
+        int width = 0;
+        boolean bold = false;
+
+        for (int i = 0; i < text.length(); ++i) {
+            char c0 = text.charAt(i);
+            int charWidth = this.getCharWidth(c0);
+
+            if (charWidth < 0 && i < text.length() - 1) {
+                ++i;
+                c0 = text.charAt(i);
+
+                if (c0 != 'l' && c0 != 'L') {
+                    if (c0 == 'r' || c0 == 'R') {
+                        bold = false;
+                    }
+                } else {
+                    bold = true;
+                }
+
+                charWidth = 0;
+            }
+
+            width += charWidth;
+
+            if (bold && charWidth > 0) {
+                ++width;
+            }
+        }
+
+        return width;
+    }
+
+    @Unique
+    private String minemoticon$trimStringToWidthCompat(String text, int maxWidth, boolean reverse) {
+        if (text == null || maxWidth <= 0) {
+            return "";
+        }
+
+        if (reverse) {
+            int bestStart = text.length();
+            for (int index = text.length(); index > 0;) {
+                int prev = minemoticon$previousTrimBoundary(text, index);
+                if (minemoticon$measureCompatWidthExact(text.substring(prev)) > maxWidth) {
+                    break;
+                }
+                bestStart = prev;
+                index = prev;
+            }
+            return text.substring(bestStart);
+        }
+
+        int bestEnd = 0;
+        for (int index = 0; index < text.length();) {
+            int next = minemoticon$nextTrimBoundary(text, index);
+            if (minemoticon$measureCompatWidthExact(text.substring(0, next)) > maxWidth) {
+                break;
+            }
+            bestEnd = next;
+            index = next;
+        }
+        return text.substring(0, bestEnd);
+    }
+
+    @Unique
+    private int minemoticon$sizeStringToWidthCompat(String text, int wrapWidth) {
+        if (text == null || text.isEmpty() || wrapWidth <= 0) {
+            return 0;
+        }
+
+        int bestEnd = 0;
+        int lastSpace = -1;
+
+        for (int index = 0; index < text.length();) {
+            char c0 = text.charAt(index);
+            if (c0 == '\n') {
+                return index;
+            }
+            if (c0 == ' ') {
+                lastSpace = index;
+            }
+
+            int next = minemoticon$nextTrimBoundary(text, index);
+            if (minemoticon$measureCompatWidthExact(text.substring(0, next)) > wrapWidth) {
+                break;
+            }
+
+            bestEnd = next;
+            index = next;
+        }
+
+        if (bestEnd < text.length() && lastSpace >= 0) {
+            return lastSpace;
+        }
+
+        return bestEnd;
+    }
+
+    @Unique
+    private int minemoticon$nextTrimBoundary(String text, int index) {
+        if (index >= text.length()) {
+            return text.length();
+        }
+        if (text.charAt(index) == 167 && index + 1 < text.length()) {
+            return index + 2;
+        }
+        int codepoint = text.codePointAt(index);
+        return index + Character.charCount(codepoint);
+    }
+
+    @Unique
+    private int minemoticon$previousTrimBoundary(String text, int index) {
+        if (index <= 0) {
+            return 0;
+        }
+
+        int prev = index - 1;
+        if (prev > 0 && Character.isLowSurrogate(text.charAt(prev))
+            && Character.isHighSurrogate(text.charAt(prev - 1))) {
+            prev--;
+        }
+        if (prev > 0 && text.charAt(prev - 1) == 167) {
+            prev--;
+        }
+        return prev;
     }
 
     @Unique
