@@ -707,6 +707,7 @@ public class EmojiPickerGui {
                     .anyMatch(
                         s -> s.toLowerCase()
                             .contains(query)))
+            .sorted((a, b) -> compareSearchMatch(a, b, query))
             .collect(Collectors.toList());
 
         for (int i = 0; i < matching.size(); i += COLS) {
@@ -716,6 +717,49 @@ public class EmojiPickerGui {
             }
             filteredLines.add(row);
         }
+    }
+
+    private static int compareSearchMatch(Emoji a, Emoji b, String query) {
+        String aBest = bestSearchString(a, query);
+        String bBest = bestSearchString(b, query);
+        boolean aPrefix = aBest.startsWith(query);
+        boolean bPrefix = bBest.startsWith(query);
+        if (aPrefix != bPrefix) return aPrefix ? -1 : 1;
+
+        int aIndex = aBest.indexOf(query);
+        int bIndex = bBest.indexOf(query);
+        if (aIndex != bIndex) return Integer.compare(aIndex, bIndex);
+
+        if (aBest.length() != bBest.length()) return Integer.compare(aBest.length(), bBest.length());
+        return aBest.compareToIgnoreCase(bBest);
+    }
+
+    private static String bestSearchString(Emoji emoji, String query) {
+        String best = null;
+        for (String candidate : emoji.strings) {
+            String lowered = candidate.toLowerCase();
+            if (!lowered.contains(query)) continue;
+            if (best == null) {
+                best = lowered;
+                continue;
+            }
+            boolean loweredPrefix = lowered.startsWith(query);
+            boolean bestPrefix = best.startsWith(query);
+            if (loweredPrefix != bestPrefix) {
+                if (loweredPrefix) best = lowered;
+                continue;
+            }
+            int loweredIndex = lowered.indexOf(query);
+            int bestIndex = best.indexOf(query);
+            if (loweredIndex != bestIndex) {
+                if (loweredIndex < bestIndex) best = lowered;
+                continue;
+            }
+            if (lowered.length() < best.length()) {
+                best = lowered;
+            }
+        }
+        return best != null ? best : "";
     }
 
     private String getCategoryAtOffset(int offset) {

@@ -68,23 +68,42 @@ public class EmojiSuggestionHelper {
             String key = entry.getKey(); // :name:
             String inner = key.substring(1, key.length() - 1);
             if (inner.contains("/")) continue;
-            if (!inner.toLowerCase()
-                .startsWith(partial)) continue;
+            String lowered = inner.toLowerCase();
+            if (!lowered.contains(partial)) continue;
             for (Emoji emoji : entry.getValue()) {
                 if (seen.contains(emoji)) continue;
                 seen.add(emoji);
                 suggestions.add(emoji);
-                if (suggestions.size() >= MAX_SUGGESTIONS) break;
             }
-            if (suggestions.size() >= MAX_SUGGESTIONS) break;
         }
 
-        // Sort shorter names first (more relevant)
-        suggestions.sort(
-            (a, b) -> a.getShorterString()
-                .length()
-                - b.getShorterString()
-                    .length());
+        // Prefix hits first, then earlier substring hits, then shorter names.
+        suggestions.sort((a, b) -> {
+            String aName = a.getShorterString()
+                .toLowerCase();
+            String bName = b.getShorterString()
+                .toLowerCase();
+            boolean aPrefix = aName.startsWith(":" + partial);
+            boolean bPrefix = bName.startsWith(":" + partial);
+            if (aPrefix != bPrefix) return aPrefix ? -1 : 1;
+
+            int aIndex = aName.indexOf(partial);
+            int bIndex = bName.indexOf(partial);
+            if (aIndex != bIndex) return Integer.compare(aIndex, bIndex);
+
+            int aLength = a.getShorterString()
+                .length();
+            int bLength = b.getShorterString()
+                .length();
+            if (aLength != bLength) return Integer.compare(aLength, bLength);
+
+            return a.getShorterString()
+                .compareToIgnoreCase(b.getShorterString());
+        });
+
+        if (suggestions.size() > MAX_SUGGESTIONS) {
+            suggestions = new ArrayList<>(suggestions.subList(0, MAX_SUGGESTIONS));
+        }
 
         active = !suggestions.isEmpty();
         if (active) selectedIndex = 0;
