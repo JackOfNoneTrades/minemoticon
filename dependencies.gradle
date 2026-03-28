@@ -39,10 +39,10 @@ ext.zigVersion = (findProperty("zigVersion") ?: "0.13.0").toString()
 
 dependencies {
     //runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.7.69-GTNH:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.113:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.81-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.115:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.82-GTNH:dev")
     runtimeOnlyNonPublishable("curse.maven:archaicfix-677782:6785842")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:2.1.9:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:2.1.12:dev")
     runtimeOnlyNonPublishable(rfg.deobf("curse.maven:catalogue-vintage-1465746:7695645")) // 1.0.2-1.7.10
     runtimeOnlyNonPublishable("org.fentanylsolutions.wawelauth:WawelAuth:b596bd6-snapshot")
 
@@ -53,5 +53,5 @@ dependencies {
 
     devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:5e53d9b-snapshot:dev")
     //devOnlyNonPublishable("org.fentanylsolutions.tabfaces:TabFaces:b7968cf-snapshot")
-    devOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.48-1.7.10:dev")
+    devOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.49-1.7.10:dev")
 }
