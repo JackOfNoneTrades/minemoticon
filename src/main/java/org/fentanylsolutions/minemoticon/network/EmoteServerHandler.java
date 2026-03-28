@@ -117,8 +117,7 @@ public class EmoteServerHandler {
     public static void onPuaRegisterRequest(EntityPlayerMP player, String pua, String name, String namespace,
         String checksum) {
         if (!ServerConfig.allowClientEmotes) {
-            NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(name, "Custom emotes disabled", pua), player);
+            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Custom emotes disabled", pua), player);
             return;
         }
 
@@ -128,8 +127,7 @@ public class EmoteServerHandler {
         }
 
         if (!isValidName(name) || (namespace != null && !namespace.isEmpty() && !isValidName(namespace))) {
-            NetworkHandler.INSTANCE
-                .sendTo(new PacketEmoteReject(name, "Invalid emote name", pua), player);
+            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Invalid emote name", pua), player);
             return;
         }
 
@@ -148,8 +146,7 @@ public class EmoteServerHandler {
             var claim = PersistentEmoteStore.claimExisting(sender, name, namespace, checksum, pua);
             if (claim == null) {
                 restoreConsumedPua(sender, pua);
-                NetworkHandler.INSTANCE
-                    .sendTo(new PacketEmoteReject(name, "Unknown emote asset", pua), player);
+                NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Unknown emote asset", pua), player);
                 return;
             }
             if (claim.quotaExceeded) {
@@ -170,8 +167,7 @@ public class EmoteServerHandler {
             return;
         }
 
-        NetworkHandler.INSTANCE
-            .sendTo(new PacketEmoteUploadRequest(name, namespace, checksum, pua), player);
+        NetworkHandler.INSTANCE.sendTo(new PacketEmoteUploadRequest(name, namespace, checksum, pua), player);
     }
 
     public static void onPuaResolveRequest(EntityPlayerMP player, String pua) {
@@ -200,13 +196,7 @@ public class EmoteServerHandler {
         String key = player.getCommandSenderName() + ":" + checksum;
         PendingUpload pending = pendingUploads.computeIfAbsent(
             key,
-            ignored -> new PendingUpload(
-                name,
-                namespace,
-                checksum,
-                player.getCommandSenderName(),
-                pua,
-                totalChunks));
+            ignored -> new PendingUpload(name, namespace, checksum, player.getCommandSenderName(), pua, totalChunks));
 
         if (chunkIndex < 0 || chunkIndex >= pending.totalChunks) return;
         if (pending.chunks[chunkIndex] != null) return;
@@ -401,9 +391,8 @@ public class EmoteServerHandler {
         } catch (IOException e) {
             Minemoticon.LOG.error("Failed to persist uploaded emote {}", pending.name, e);
             restoreConsumedPua(pending.senderName, pending.pua);
-            NetworkHandler.INSTANCE.sendTo(
-                new PacketEmoteReject(pending.name, "Failed to persist emote", pending.pua),
-                player);
+            NetworkHandler.INSTANCE
+                .sendTo(new PacketEmoteReject(pending.name, "Failed to persist emote", pending.pua), player);
             return;
         }
 

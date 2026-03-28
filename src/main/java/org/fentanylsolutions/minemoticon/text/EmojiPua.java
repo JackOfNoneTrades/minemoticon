@@ -20,8 +20,7 @@ public final class EmojiPua {
     }
 
     public static boolean isPuaToken(String token) {
-        return token != null
-            && token.length() == TOKEN_LENGTH
+        return token != null && token.length() == TOKEN_LENGTH
             && isPua(token.charAt(0))
             && isPua(token.charAt(1))
             && token.charAt(0) != token.charAt(1);
