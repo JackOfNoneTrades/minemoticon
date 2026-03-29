@@ -203,11 +203,13 @@ public class ClientEmojiHandler {
                 registration.resourceLocation);
             EMOJI_LOOKUP.put(emoji.getNamespaced(), emoji);
             registerShortName(emoji.getNamespaced(), emoji);
-            EMOJI_MAP.computeIfAbsent(registration.category, ignored -> new ArrayList<>())
-                .add(emoji);
-            EMOJI_LIST.add(emoji);
+            if (!registration.hideFromPicker) {
+                EMOJI_MAP.computeIfAbsent(registration.category, ignored -> new ArrayList<>())
+                    .add(emoji);
+                EMOJI_LIST.add(emoji);
+                PACK_CATEGORY_ICONS.putIfAbsent(registration.category, emoji);
+            }
             RESOURCE_EMOJIS.add(emoji);
-            PACK_CATEGORY_ICONS.putIfAbsent(registration.category, emoji);
         }
         if (rebuildPicker) {
             buildPickerData();

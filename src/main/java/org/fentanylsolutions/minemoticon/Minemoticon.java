@@ -74,17 +74,31 @@ public class Minemoticon {
     }
 
     private static void registerBuiltinResourceEmojis() {
-        MinemoticonApi
-            .registerResourceEmoji(MODID, "license", "Minemoticon", new ResourceLocation(MODID, "emojis/license.png"));
-        MinemoticonApi
-            .registerResourceEmoji(MODID, "chad", "Minemoticon", new ResourceLocation(MODID, "emojis/chad.webp"));
+        boolean hideFromPicker = !isDebugMode();
+        MinemoticonApi.registerResourceEmoji(
+            MODID,
+            "license",
+            "Minemoticon",
+            new ResourceLocation(MODID, "emojis/license.png"),
+            hideFromPicker);
+        MinemoticonApi.registerResourceEmoji(
+            MODID,
+            "chad",
+            "Minemoticon",
+            new ResourceLocation(MODID, "emojis/chad.webp"),
+            hideFromPicker);
         MinemoticonApi.registerResourceEmoji(
             MODID,
             "pepevibin",
             "Minemoticon",
-            new ResourceLocation(MODID, "emojis/pepevibin.gif"));
-        MinemoticonApi
-            .registerResourceEmoji(MODID, "jig", "Minemoticon", new ResourceLocation(MODID, "emojis/jig.gif"));
+            new ResourceLocation(MODID, "emojis/pepevibin.gif"),
+            hideFromPicker);
+        MinemoticonApi.registerResourceEmoji(
+            MODID,
+            "jig",
+            "Minemoticon",
+            new ResourceLocation(MODID, "emojis/jig.gif"),
+            hideFromPicker);
     }
 
     private static void decorateModMetadata() {

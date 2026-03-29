@@ -21,13 +21,15 @@ public final class MinemoticonApi {
         public final String name;
         public final String category;
         public final ResourceLocation resourceLocation;
+        public final boolean hideFromPicker;
 
         private ResourceEmojiRegistration(String prefix, String name, String category,
-            ResourceLocation resourceLocation) {
+            ResourceLocation resourceLocation, boolean hideFromPicker) {
             this.prefix = prefix;
             this.name = name;
             this.category = category;
             this.resourceLocation = resourceLocation;
+            this.hideFromPicker = hideFromPicker;
         }
 
         public String getToken() {
@@ -41,11 +43,21 @@ public final class MinemoticonApi {
 
     public static synchronized void registerResourceEmoji(String prefix, String name,
         ResourceLocation resourceLocation) {
-        registerResourceEmoji(prefix, name, prefix, resourceLocation);
+        registerResourceEmoji(prefix, name, prefix, resourceLocation, false);
+    }
+
+    public static synchronized void registerResourceEmoji(String prefix, String name, ResourceLocation resourceLocation,
+        boolean hideFromPicker) {
+        registerResourceEmoji(prefix, name, prefix, resourceLocation, hideFromPicker);
     }
 
     public static synchronized void registerResourceEmoji(String prefix, String name, String category,
         ResourceLocation resourceLocation) {
+        registerResourceEmoji(prefix, name, category, resourceLocation, false);
+    }
+
+    public static synchronized void registerResourceEmoji(String prefix, String name, String category,
+        ResourceLocation resourceLocation, boolean hideFromPicker) {
         if (resourceLocation == null) {
             throw new IllegalArgumentException("resourceLocation cannot be null");
         }
@@ -59,7 +71,8 @@ public final class MinemoticonApi {
             normalizedPrefix,
             normalizedName,
             normalizedCategory,
-            resourceLocation);
+            resourceLocation,
+            hideFromPicker);
         RESOURCE_EMOJIS.put(registration.getToken(), registration);
 
         if (FMLCommonHandler.instance()
