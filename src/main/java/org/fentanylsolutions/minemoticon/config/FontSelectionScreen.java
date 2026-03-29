@@ -82,6 +82,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         0x2603 };
     private static final int PREVIEW_GLYPH_SIZE = 48;
     private static final int PREVIEW_DISPLAY_SIZE = 12;
+    private static final String PREVIEW_TEXT_SAMPLE = "Abg 123";
     private static final int MAX_PREVIEW_CACHE_ENTRIES = 24;
     private static final long MAX_PREVIEW_CACHE_BYTES = 6L * 1024 * 1024;
     private static final String SETTINGS_GEAR = "\u2699";
@@ -583,6 +584,38 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         }
     }
 
+    private void renderPreviewImage(PreviewTexture preview, int x, int y) {
+        if (preview == null || !preview.canRender()) {
+            return;
+        }
+        int width = Math.max(1, preview.getImageWidth());
+        int height = Math.max(1, preview.getImageHeight());
+        mc.getTextureManager()
+            .bindTexture(preview.location);
+        GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+        Tessellator tessellator = Tessellator.instance;
+        tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+        tessellator.addVertexWithUV(x, y, 0, 0, 0);
+        tessellator.addVertexWithUV(x, y + height, 0, 0, 1);
+        tessellator.addVertexWithUV(x + width, y, 0, 1, 0);
+        tessellator.addVertexWithUV(x + width, y + height, 0, 1, 1);
+        tessellator.draw();
+    }
+
+    private void renderLiveTextPreview(FontSource source, int x, int y, int maxWidth) {
+        if (source == null || maxWidth <= 0) {
+            return;
+        }
+        FontStack previous = ClientEmojiHandler
+            .pushFontStackOverride(new FontStack(Arrays.asList(source, new MinecraftFontSource())));
+        try {
+            String sample = fontRendererObj.trimStringToWidth(PREVIEW_TEXT_SAMPLE, maxWidth);
+            fontRendererObj.drawStringWithShadow(sample, x, y, 0xFFFFFFFF);
+        } finally {
+            ClientEmojiHandler.popFontStackOverride(previous);
+        }
+    }
+
     // --- Scrollbar interaction ---
 
     private boolean isInsideScrollbar(int sbX, int colY, int colH, int maxScroll, int mouseX, int mouseY) {
@@ -668,7 +701,7 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         String key = source.getId();
         PreviewTexture preview = previews.get(key);
         if (preview == null) {
-            preview = new PreviewTexture(key);
+            preview = new PreviewTexture(key, source.preserveTextLineMetrics());
             previews.put(key, preview);
             mc.getTextureManager()
                 .loadTexture(preview.location, preview);
@@ -683,7 +716,11 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         if (source instanceof CustomFontSource) {
             File file = new File(ClientEmojiHandler.FONTS_DIR, source.getId());
             if (file.isFile()) {
-                loadFontPreview(source.getId(), file, preview);
+                if (source.preserveTextLineMetrics()) {
+                    loadTextFontPreview(source, file, preview);
+                } else {
+                    loadFontPreview(source.getId(), file, preview);
+                }
             } else {
                 preview.setUnsupported("File not found");
             }
@@ -761,6 +798,38 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         });
     }
 
+    private void loadTextFontPreview(FontSource source, File file, PreviewTexture preview) {
+        String fontId = source.getId();
+        Map<String, Float> variationSettings = getVariationSettings(fontId);
+        String cacheKey = file.getAbsolutePath() + "#text#" + FontVariationConfig.signature(variationSettings);
+        long fileSize = file.length();
+        long lastModified = file.lastModified();
+        CachedPreviewStrip cached = getCachedPreviewStrip(cacheKey, fileSize, lastModified);
+        if (applyCachedPreview(cached, preview)) return;
+
+        DownloadedTexture.submitToPool(() -> {
+            boolean permit = false;
+            try {
+                PREVIEW_LOAD_SEMAPHORE.acquire();
+                permit = true;
+                Font baseFont = Font.createFont(Font.TRUETYPE_FONT, file);
+                BufferedImage strip = buildTextPreviewImage(
+                    baseFont,
+                    source.getVariationAxes(),
+                    variationSettings,
+                    FontVariationConfig.getDisplayHeight(variationSettings, source.getDisplayHeight()));
+                preview.setImage(strip);
+                cachePreviewStrip(new CachedPreviewStrip(cacheKey, fileSize, lastModified, strip, null));
+            } catch (Exception e) {
+                String reason = simplifyLoadError(e);
+                preview.setUnsupported(reason);
+                cachePreviewStrip(new CachedPreviewStrip(cacheKey, fileSize, lastModified, null, reason));
+            } finally {
+                if (permit) PREVIEW_LOAD_SEMAPHORE.release();
+            }
+        });
+    }
+
     private BufferedImage buildPreviewStrip(ColorFont font) {
         int count = PREVIEW_CODEPOINTS.length;
         BufferedImage strip = new BufferedImage(
@@ -776,6 +845,52 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         }
         g.dispose();
         return strip;
+    }
+
+    private BufferedImage buildTextPreviewImage(Font baseFont, List<VariationAxis> axes, Map<String, Float> settings,
+        float displayHeight) {
+        Font derived = baseFont.deriveFont(256.0f);
+        Font previewFont = ColorFont
+            .applyVariationSettings(derived, axes, FontVariationConfig.copyVariationSettings(settings));
+        FontRenderContext context = new FontRenderContext(new AffineTransform(), true, false);
+        LineMetrics lineMetrics = previewFont.getLineMetrics(PREVIEW_TEXT_SAMPLE, context);
+        double metricHeight = Math.max(1.0d, lineMetrics.getAscent() + lineMetrics.getDescent());
+        float targetHeight = FontVariationConfig.clampDisplayHeight(displayHeight);
+        double scale = Math.max(0.01d, Math.max(9.0d, targetHeight) / metricHeight);
+
+        GlyphVector glyphVector = previewFont.layoutGlyphVector(
+            context,
+            PREVIEW_TEXT_SAMPLE.toCharArray(),
+            0,
+            PREVIEW_TEXT_SAMPLE.length(),
+            Font.LAYOUT_LEFT_TO_RIGHT);
+        Shape outline = glyphVector.getOutline();
+        Rectangle2D bounds = outline.getBounds2D();
+        double minX = bounds != null ? Math.min(0.0d, bounds.getX()) : 0.0d;
+        double maxX = Math.max(
+            glyphVector.getGlyphPosition(glyphVector.getNumGlyphs())
+                .getX(),
+            bounds != null ? bounds.getMaxX() : 0.0d);
+
+        int padX = 2;
+        int padY = 2;
+        int width = Math.max(1, (int) Math.ceil((maxX - minX) * scale + padX * 2.0d));
+        int height = Math.max(12, (int) Math.ceil(metricHeight * scale + padY * 2.0d));
+
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = image.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+        g.setColor(java.awt.Color.WHITE);
+
+        AffineTransform transform = new AffineTransform();
+        transform.translate(Math.rint(padX - minX * scale), Math.rint(padY + lineMetrics.getAscent() * scale));
+        transform.scale(scale, scale);
+        g.fill(transform.createTransformedShape(outline));
+        g.dispose();
+        return image;
     }
 
     // --- Font import ---
@@ -1857,6 +1972,9 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
             int previewY = y + 18;
             if (source instanceof MinecraftFontSource) {
                 fontRendererObj.drawString("Standard bitmap font", textX, previewY + 2, 0xFF888888);
+            } else if (source.preserveTextLineMetrics()) {
+                int previewMaxWidth = Math.max(24, w - CARD_PAD * 2 - rightButtonCount * (MINI_BTN + 2) - 4);
+                renderLiveTextPreview(source, textX, previewY + 1, previewMaxWidth);
             } else if (preview != null && preview.canRender()) {
                 renderPreviewStrip(preview, textX, previewY, PREVIEW_DISPLAY_SIZE);
             } else if (preview != null && preview.isUnsupported()) {
@@ -2209,6 +2327,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
         private volatile boolean unsupported;
         private volatile String unsupportedReason = "";
         private volatile boolean loadRequested;
+        private volatile int imageWidth;
+        private volatile int imageHeight;
 
         PreviewTexture(String id) {
             this(id, false);
@@ -2227,6 +2347,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
         void setImage(BufferedImage img) {
             pending.set(img);
+            imageWidth = img != null ? img.getWidth() : 0;
+            imageHeight = img != null ? img.getHeight() : 0;
             ready = false;
             unsupported = false;
             unsupportedReason = "";
@@ -2235,6 +2357,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
         void setUnsupported(String reason) {
             pending.set(null);
+            imageWidth = 0;
+            imageHeight = 0;
             ready = false;
             unsupported = true;
             unsupportedReason = reason != null ? reason : "";
@@ -2243,6 +2367,8 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
         void reset() {
             pending.set(null);
+            imageWidth = 0;
+            imageHeight = 0;
             ready = false;
             unsupported = false;
             unsupportedReason = "";
@@ -2259,6 +2385,14 @@ public class FontSelectionScreen extends GuiScreen implements DropListener {
 
         String getUnsupportedReason() {
             return unsupportedReason;
+        }
+
+        int getImageWidth() {
+            return imageWidth;
+        }
+
+        int getImageHeight() {
+            return imageHeight;
         }
 
         @Override
