@@ -77,6 +77,11 @@ public class EmojiPickerGui {
     private final int gearX, gearY;
 
     public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight) {
+        this(chatInput, font, screenWidth, screenHeight, screenWidth - CELL - 2, screenHeight - CELL);
+    }
+
+    public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight,
+        int customButtonX, int customButtonY) {
         this.font = font;
         this.screenHeight = screenHeight;
 
@@ -85,8 +90,16 @@ public class EmojiPickerGui {
 
         panelW = PAD + SIDEBAR_W + GAP + gridW + GAP + SCROLLBAR_W + PAD;
         panelH = PAD + SEARCH_H + GAP + gridH + GAP + INFO_H + PAD;
-        panelX = screenWidth - panelW - 2;
-        panelY = screenHeight - 14 - panelH;
+
+        buttonX = customButtonX;
+        buttonY = customButtonY;
+
+        // Anchor panel above and right-aligned to the button
+        int desiredPanelX = buttonX + CELL - panelW;
+        int desiredPanelY = buttonY - panelH - 2;
+        // Clamp to screen
+        panelX = Math.max(2, Math.min(desiredPanelX, screenWidth - panelW - 2));
+        panelY = Math.max(2, desiredPanelY);
 
         sidebarX = panelX + PAD;
         sidebarY = panelY + PAD + SEARCH_H + GAP;
@@ -97,9 +110,6 @@ public class EmojiPickerGui {
         scrollbarX = gridX + gridW + GAP;
 
         infoY = gridY + gridH + GAP;
-
-        buttonX = screenWidth - CELL - 2;
-        buttonY = screenHeight - CELL;
 
         var lookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + EmojiConfig.pickerButtonEmoji + ":");
         if (lookup instanceof RenderableEmoji r) buttonEmoji = r;
@@ -415,9 +425,15 @@ public class EmojiPickerGui {
     private void renderButtonEmoji(int mouseX, int mouseY) {
         var texLoc = buttonEmoji.getResourceLocation();
         if (texLoc == null) return;
+
+        int prevTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
         Minecraft.getMinecraft()
             .getTextureManager()
             .bindTexture(texLoc);
+
+        boolean blendWasEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
+        GL11.glEnable(GL11.GL_BLEND);
+        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
 
         boolean hovered = mouseX >= buttonX && mouseX < buttonX + CELL && mouseY >= buttonY && mouseY < buttonY + CELL;
         float brightness = hovered || open ? 0.9f : 0.6f;
@@ -442,6 +458,10 @@ public class EmojiPickerGui {
         tessellator.draw();
 
         GL11.glColor4f(1, 1, 1, 1);
+        if (!blendWasEnabled) {
+            GL11.glDisable(GL11.GL_BLEND);
+        }
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, prevTexture);
     }
 
     private void enableScissor(int x, int y, int w, int h) {

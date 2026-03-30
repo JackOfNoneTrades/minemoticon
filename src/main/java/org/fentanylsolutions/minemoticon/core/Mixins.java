@@ -44,6 +44,11 @@ public class Mixins extends FentMixins {
             .phase(MixinUtil.Phase.EARLY)
             .side(MiscUtil.Side.CLIENT)
             .build();
+
+        registry.mixin("MixinGuiRepair")
+            .phase(MixinUtil.Phase.EARLY)
+            .side(MiscUtil.Side.CLIENT)
+            .build();
     }
 
     public static java.util.List<String> getEarlyMixinsForLoader() {
