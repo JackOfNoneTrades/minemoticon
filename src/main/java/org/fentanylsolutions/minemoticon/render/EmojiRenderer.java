@@ -19,6 +19,7 @@ import org.lwjgl.opengl.GL11;
 public class EmojiRenderer {
 
     public static final float EMOJI_SIZE = 10.0f;
+    private static final RenderableEmoji UNRESOLVED_PUA_PLACEHOLDER = UnresolvedPuaPlaceholder.INSTANCE;
     private static final int MAX_PARSE_CACHE_ENTRIES = 512;
     private static final int MAX_CACHED_TEXT_LENGTH = 256;
     private static final ParseCacheEntry NO_MATCH = new ParseCacheEntry(null, null);
@@ -97,7 +98,7 @@ public class EmojiRenderer {
                 }
                 if (detailedSegments == null) detailedSegments = new ArrayList<>();
                 if (i > lastEnd) detailedSegments.add(ParsedSegment.text(text.substring(lastEnd, i)));
-                detailedSegments.add(ParsedSegment.text("\u25A0"));
+                detailedSegments.add(ParsedSegment.emoji(puaToken, UNRESOLVED_PUA_PLACEHOLDER));
                 lastEnd = i + EmojiPua.TOKEN_LENGTH;
                 i = lastEnd;
                 continue;
@@ -318,6 +319,11 @@ public class EmojiRenderer {
     }
 
     public static void renderQuad(RenderableEmoji emoji, float x, float y) {
+        if (emoji == UNRESOLVED_PUA_PLACEHOLDER) {
+            renderUnresolvedPlaceholder(x, y);
+            return;
+        }
+
         var texLoc = emoji.getResourceLocation();
         if (texLoc == null) return;
         Minecraft.getMinecraft()
@@ -350,6 +356,65 @@ public class EmojiRenderer {
 
         if (!blendWasEnabled) {
             GL11.glDisable(GL11.GL_BLEND);
+        }
+    }
+
+    private static void renderUnresolvedPlaceholder(float x, float y) {
+        boolean textureWasEnabled = GL11.glIsEnabled(GL11.GL_TEXTURE_2D);
+        boolean blendWasEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
+        if (textureWasEnabled) {
+            GL11.glDisable(GL11.GL_TEXTURE_2D);
+        }
+        if (!blendWasEnabled) {
+            GL11.glEnable(GL11.GL_BLEND);
+        }
+        GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+
+        float inset = 1.0f;
+        float x0 = x + inset;
+        float y0 = y + inset;
+        float x1 = x + EMOJI_SIZE - inset;
+        float y1 = y + EMOJI_SIZE - inset;
+        float border = 0.75f;
+
+        Tessellator tessellator = Tessellator.instance;
+
+        GL11.glColor4f(0.85f, 0.85f, 0.85f, 0.85f);
+        tessellator.startDrawing(GL11.GL_TRIANGLE_STRIP);
+        tessellator.addVertex(x0 + border, y0 + border, 0.0);
+        tessellator.addVertex(x0 + border, y1 - border, 0.0);
+        tessellator.addVertex(x1 - border, y0 + border, 0.0);
+        tessellator.addVertex(x1 - border, y1 - border, 0.0);
+        tessellator.draw();
+
+        GL11.glColor4f(0.35f, 0.35f, 0.35f, 1.0f);
+        tessellator.startDrawing(GL11.GL_LINE_LOOP);
+        tessellator.addVertex(x0, y0, 0.0);
+        tessellator.addVertex(x0, y1, 0.0);
+        tessellator.addVertex(x1, y1, 0.0);
+        tessellator.addVertex(x1, y0, 0.0);
+        tessellator.draw();
+
+        if (textureWasEnabled) {
+            GL11.glEnable(GL11.GL_TEXTURE_2D);
+        }
+        if (!blendWasEnabled) {
+            GL11.glDisable(GL11.GL_BLEND);
+        }
+    }
+
+    private static final class UnresolvedPuaPlaceholder implements RenderableEmoji {
+
+        private static final UnresolvedPuaPlaceholder INSTANCE = new UnresolvedPuaPlaceholder();
+
+        @Override
+        public net.minecraft.util.ResourceLocation getResourceLocation() {
+            return null;
+        }
+
+        @Override
+        public boolean isLoaded() {
+            return true;
         }
     }
 }

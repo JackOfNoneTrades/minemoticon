@@ -10,6 +10,7 @@ import net.minecraft.util.IChatComponent;
 
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
+import org.fentanylsolutions.minemoticon.api.EmojiFromRemote;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 
@@ -89,6 +90,10 @@ public final class ChatEmojiTooltipHelper {
     }
 
     private static String getTooltipText(RenderableEmoji emoji) {
+        if (emoji instanceof EmojiFromRemote remoteEmoji && !remoteEmoji.getHoverText()
+            .isEmpty()) {
+            return remoteEmoji.getHoverText();
+        }
         if (emoji instanceof EmojiFromPack packEmoji) {
             return "\\" + packEmoji.getNamespaced();
         }

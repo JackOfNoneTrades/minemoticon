@@ -12,6 +12,7 @@ public final class EmojiPua {
     public static final int COUNT = END - START + 1;
     public static final int TOKEN_LENGTH = 2;
     public static final int TOKEN_COUNT = COUNT * (COUNT - 1);
+    public static final int RESERVED_ONE_OFF_COUNT = Math.min(10000, TOKEN_COUNT);
 
     private EmojiPua() {}
 
@@ -43,6 +44,37 @@ public final class EmojiPua {
         int secondIndex = index % (COUNT - 1);
         int second = secondIndex >= first ? secondIndex + 1 : secondIndex;
         return new String(new char[] { (char) (START + first), (char) (START + second) });
+    }
+
+    public static int toTokenIndex(String token) {
+        if (!isPuaToken(token)) {
+            return -1;
+        }
+
+        int first = token.charAt(0) - START;
+        int second = token.charAt(1) - START;
+        int secondIndex = second > first ? second - 1 : second;
+        return first * (COUNT - 1) + secondIndex;
+    }
+
+    public static int reservedOneOffStartIndex() {
+        return TOKEN_COUNT - RESERVED_ONE_OFF_COUNT;
+    }
+
+    public static boolean isReservedOneOffIndex(int index) {
+        return index >= reservedOneOffStartIndex() && index < TOKEN_COUNT;
+    }
+
+    public static boolean isReservedOneOffToken(String token) {
+        int index = toTokenIndex(token);
+        return index >= 0 && isReservedOneOffIndex(index);
+    }
+
+    public static String fromReservedOneOffSlot(int slot) {
+        if (slot < 0 || slot >= RESERVED_ONE_OFF_COUNT) {
+            throw new IllegalArgumentException("Reserved one-off slot out of range: " + slot);
+        }
+        return fromTokenIndex(reservedOneOffStartIndex() + slot);
     }
 
     public static String encodeLeasePayload(Iterable<String> tokens) {

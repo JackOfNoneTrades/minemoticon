@@ -13,15 +13,22 @@ public class EmojiFromRemote extends Emoji implements RenderableEmoji {
     private final File cacheFile;
     private final String checksum;
     private final boolean usable; // if true, appears in picker
+    private final String hoverText;
     private FileTexture texture;
     private ResourceLocation resourceLocation;
 
     public EmojiFromRemote(String name, String checksum, File cacheFile, String category, boolean usable) {
+        this(name, checksum, cacheFile, category, usable, "");
+    }
+
+    public EmojiFromRemote(String name, String checksum, File cacheFile, String category, boolean usable,
+        String hoverText) {
         this.name = name;
         this.checksum = checksum;
         this.cacheFile = cacheFile;
         this.category = category;
         this.usable = usable;
+        this.hoverText = hoverText != null ? hoverText : "";
         this.strings.add(":" + name + ":");
     }
 
@@ -58,6 +65,10 @@ public class EmojiFromRemote extends Emoji implements RenderableEmoji {
 
     public boolean isUsable() {
         return usable;
+    }
+
+    public String getHoverText() {
+        return hoverText;
     }
 
     public void destroy() {

@@ -47,6 +47,7 @@ public class CommonProxy {
             Minemoticon.debug("Sending presence packet to {}", player.getCommandSenderName());
             NetworkHandler.INSTANCE.sendTo(new PacketServerPresence(), player);
             EmoteServerHandler.sendServerPacksToPlayer(player);
+            EmoteServerHandler.sendOneOffsToPlayer(player);
             EmoteServerHandler.sendPuaLeasesToPlayer(player);
         }
     }

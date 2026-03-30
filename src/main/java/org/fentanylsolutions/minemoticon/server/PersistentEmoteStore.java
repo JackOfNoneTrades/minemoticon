@@ -790,6 +790,9 @@ public final class PersistentEmoteStore {
         private String allocateNextPua() {
             Set<String> used = getAssignedPuas();
             for (int i = 0; i < EmojiPua.TOKEN_COUNT; i++) {
+                if (EmojiPua.isReservedOneOffIndex(i)) {
+                    continue;
+                }
                 String token = EmojiPua.fromTokenIndex(i);
                 if (!used.contains(token)) {
                     return token;

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.server.MinecraftServer;
@@ -108,6 +109,8 @@ public class EmoteServerHandler {
     private static final Map<String, ArrayDeque<String>> availablePuasByOwner = new ConcurrentHashMap<>();
     private static final Map<String, Set<String>> leasedPuasByOwner = new ConcurrentHashMap<>();
     private static final Map<String, String> leasedPuaOwners = new ConcurrentHashMap<>();
+    private static final Map<String, CachedEmote> oneOffCacheByPua = new ConcurrentHashMap<>();
+    private static final AtomicInteger nextOneOffPuaSlot = new AtomicInteger();
 
     public static void bootstrapPersistentStore() {
         PersistentEmoteStore.bootstrap();
@@ -176,14 +179,22 @@ public class EmoteServerHandler {
         }
 
         PersistentEmoteStore.BroadcastAlias alias = PersistentEmoteStore.getAliasForPua(pua);
-        if (alias == null) {
-            NetworkHandler.INSTANCE.sendTo(new PacketPuaResolveResponse(pua), player);
+        if (alias != null) {
+            NetworkHandler.INSTANCE.sendTo(
+                new PacketPuaResolveResponse(alias.name, alias.checksum, alias.owner, alias.namespace, alias.pua),
+                player);
             return;
         }
 
-        NetworkHandler.INSTANCE.sendTo(
-            new PacketPuaResolveResponse(alias.name, alias.checksum, alias.owner, alias.namespace, alias.pua),
-            player);
+        CachedEmote cached = findCachedByPua(pua);
+        if (cached != null) {
+            NetworkHandler.INSTANCE.sendTo(
+                new PacketPuaResolveResponse(cached.name, cached.checksum, cached.sender, cached.namespace, cached.pua),
+                player);
+            return;
+        }
+
+        NetworkHandler.INSTANCE.sendTo(new PacketPuaResolveResponse(pua), player);
     }
 
     public static void onEmoteDataUpload(EntityPlayerMP player, String name, String namespace, String checksum,
@@ -561,6 +572,24 @@ public class EmoteServerHandler {
         return null;
     }
 
+    private static CachedEmote findCachedByPua(String pua) {
+        if (!EmojiPua.isPuaToken(pua)) {
+            return null;
+        }
+
+        CachedEmote oneOff = oneOffCacheByPua.get(pua);
+        if (oneOff != null && pua.equals(oneOff.pua)) {
+            return oneOff;
+        }
+
+        for (CachedEmote cached : emoteCache.values()) {
+            if (pua.equals(cached.pua)) {
+                return cached;
+            }
+        }
+        return null;
+    }
+
     private static String quotaMessage(long usedBytes, long quotaBytes, int usedCount, int quotaCount) {
         boolean hasByteQuota = quotaBytes > 0;
         boolean hasCountQuota = quotaCount > 0;
@@ -673,6 +702,25 @@ public class EmoteServerHandler {
         }
     }
 
+    public static void sendOneOffsToPlayer(EntityPlayerMP player) {
+        for (Map.Entry<String, CachedEmote> entry : emoteCache.entrySet()) {
+            if (entry.getValue().type == PacketEmoteBroadcast.TYPE_ONE_OFF) {
+                CachedEmote cached = entry.getValue();
+                NetworkHandler.INSTANCE.sendTo(
+                    new PacketEmoteBroadcast(
+                        entry.getKey(),
+                        cached.checksum,
+                        cached.sender,
+                        PacketEmoteBroadcast.TYPE_ONE_OFF,
+                        cached.category,
+                        cached.namespace,
+                        cached.pua,
+                        cached.isIcon),
+                    player);
+            }
+        }
+    }
+
     public static void registerOneOff(String name, byte[] imageData) {
         registerOneOff(name, name, imageData);
     }
@@ -684,19 +732,34 @@ public class EmoteServerHandler {
             return;
         }
         String checksum = sha1(sanitized);
+        String pua = findReusableOneOffPua(checksum);
+        if (!EmojiPua.isPuaToken(pua)) {
+            pua = allocateOneOffPua();
+        }
         CachedEmote cached = new CachedEmote(
             name,
             checksum,
             sanitized,
-            "",
+            sourceName != null ? sourceName : name,
             PacketEmoteBroadcast.TYPE_ONE_OFF,
             "",
             "",
-            "",
+            pua,
             false);
         emoteCache.put(name, cached);
+        if (EmojiPua.isPuaToken(pua)) {
+            oneOffCacheByPua.put(pua, cached);
+        }
         broadcastToAll(name, cached);
-        Minemoticon.debug("Registered one-off emote: {} (checksum {})", name, checksum);
+        Minemoticon.debug("Registered one-off emote: {} (checksum {}, pua={})", name, checksum, pua);
+    }
+
+    public static String getInsertText(String name) {
+        CachedEmote cached = emoteCache.get(name);
+        if (cached == null) {
+            return ":" + name + ":";
+        }
+        return EmojiPua.isPuaToken(cached.pua) ? cached.pua : ":" + name + ":";
     }
 
     public static String sha1(byte[] data) {
@@ -715,12 +778,46 @@ public class EmoteServerHandler {
         Set<String> used = new HashSet<>(PersistentEmoteStore.getAssignedPuas());
         used.addAll(leasedPuaOwners.keySet());
         for (int i = 0; i < EmojiPua.TOKEN_COUNT; i++) {
+            if (EmojiPua.isReservedOneOffIndex(i)) {
+                continue;
+            }
             String token = EmojiPua.fromTokenIndex(i);
             if (!used.contains(token)) {
                 return token;
             }
         }
         throw new IllegalStateException("Ran out of private-use emoji references");
+    }
+
+    private static String findReusableOneOffPua(String checksum) {
+        if (checksum == null || checksum.isEmpty()) {
+            return null;
+        }
+
+        CachedEmote cached = findCachedByChecksum(checksum);
+        if (cached != null && EmojiPua.isReservedOneOffToken(cached.pua)) {
+            return cached.pua;
+        }
+        return null;
+    }
+
+    private static String allocateOneOffPua() {
+        if (EmojiPua.RESERVED_ONE_OFF_COUNT <= 0) {
+            throw new IllegalStateException("No reserved private-use emoji references are available for one-offs");
+        }
+
+        Set<String> blocked = new HashSet<>(PersistentEmoteStore.getAssignedPuas());
+        blocked.addAll(leasedPuaOwners.keySet());
+        int startSlot = Math.floorMod(nextOneOffPuaSlot.getAndIncrement(), EmojiPua.RESERVED_ONE_OFF_COUNT);
+
+        for (int offset = 0; offset < EmojiPua.RESERVED_ONE_OFF_COUNT; offset++) {
+            String token = EmojiPua.fromReservedOneOffSlot((startSlot + offset) % EmojiPua.RESERVED_ONE_OFF_COUNT);
+            if (!blocked.contains(token)) {
+                return token;
+            }
+        }
+
+        return EmojiPua.fromReservedOneOffSlot(startSlot);
     }
 
     private static void refillPuas(EntityPlayerMP player) {

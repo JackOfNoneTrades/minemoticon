@@ -67,14 +67,17 @@ public class EmoteClientHandler {
         final String name;
         final String category;
         final String namespace;
+        final String tooltipText;
         final String pua;
         final boolean usable;
         final boolean isIcon;
 
-        PendingAlias(String name, String category, String namespace, String pua, boolean usable, boolean isIcon) {
+        PendingAlias(String name, String category, String namespace, String tooltipText, String pua, boolean usable,
+            boolean isIcon) {
             this.name = name;
             this.category = category;
             this.namespace = namespace != null ? namespace : "";
+            this.tooltipText = tooltipText != null ? tooltipText : "";
             this.pua = pua != null ? pua : "";
             this.usable = usable;
             this.isIcon = isIcon;
@@ -240,6 +243,7 @@ public class EmoteClientHandler {
         }
 
         boolean usable = type == PacketEmoteBroadcast.TYPE_SERVER_PACK;
+        String tooltipText = type == PacketEmoteBroadcast.TYPE_ONE_OFF ? senderName : "";
         String effectiveCategory = (category != null && !category.isEmpty()) ? category
             : (usable ? "Server" : "Remote");
         Minemoticon.debug(
@@ -269,7 +273,7 @@ public class EmoteClientHandler {
 
         File cached = findCachedEmoteFile(checksum);
         if (cached != null && cached.isFile()) {
-            registerRemoteEmoji(name, checksum, cached, effectiveCategory, namespace, pua, usable, isIcon);
+            registerRemoteEmoji(name, checksum, cached, effectiveCategory, namespace, tooltipText, pua, usable, isIcon);
             return;
         }
 
@@ -277,7 +281,7 @@ public class EmoteClientHandler {
         boolean knownAlias = aliases.stream()
             .anyMatch(alias -> alias.name.equals(name) && alias.namespace.equals(namespace != null ? namespace : ""));
         if (!knownAlias) {
-            aliases.add(new PendingAlias(name, effectiveCategory, namespace, pua, usable, isIcon));
+            aliases.add(new PendingAlias(name, effectiveCategory, namespace, tooltipText, pua, usable, isIcon));
         }
 
         queueDownloadRequest(checksum);
@@ -563,6 +567,7 @@ public class EmoteClientHandler {
                         cacheFile,
                         alias.category,
                         alias.namespace,
+                        alias.tooltipText,
                         alias.pua,
                         alias.usable,
                         alias.isIcon);
@@ -611,9 +616,9 @@ public class EmoteClientHandler {
     }
 
     private static void registerRemoteEmoji(String name, String checksum, File cacheFile, String category,
-        String namespace, String pua, boolean usable, boolean isIcon) {
-        EmojiFromRemote emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable);
-        boolean registerAlias = usable || pua == null || pua.isEmpty();
+        String namespace, String tooltipText, String pua, boolean usable, boolean isIcon) {
+        EmojiFromRemote emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable, tooltipText);
+        boolean registerAlias = usable || pua == null || pua.isEmpty() || EmojiPua.isReservedOneOffToken(pua);
         if (registerAlias) {
             ClientEmojiHandler.EMOJI_LOOKUP.put(":" + name + ":", emoji);
             ClientEmojiHandler.registerShortName(":" + name + ":", emoji);
