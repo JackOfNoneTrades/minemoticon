@@ -51,7 +51,7 @@ dependencies {
     shadowImplementation("com.github.weisj:jsvg:2.0.0")
     shadowImplementation("net.java.dev.jna:jna:5.18.1")
 
-    devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:5e53d9b-snapshot:dev")
+    devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:de93ae6-snapshot:dev")
     //devOnlyNonPublishable("org.fentanylsolutions.tabfaces:TabFaces:b7968cf-snapshot")
     devOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.49-1.7.10:dev")
 }

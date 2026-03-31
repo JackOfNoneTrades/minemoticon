@@ -1,8 +1,9 @@
 package org.fentanylsolutions.minemoticon.image;
 
-import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.util.Arrays;
+
+import org.fentanylsolutions.fentlib.util.ImageUtil;
 
 public final class EmojiImageData {
 
@@ -34,7 +35,7 @@ public final class EmojiImageData {
     }
 
     public static EmojiImageData fromStatic(BufferedImage image) {
-        BufferedImage argb = copyToArgb(image);
+        BufferedImage argb = ImageUtil.copyToArgb(image);
         return new EmojiImageData(argb, argb.getWidth(), argb.getHeight(), 1, 1, new int[] { DEFAULT_DELAY_MS });
     }
 
@@ -61,7 +62,7 @@ public final class EmojiImageData {
         }
 
         return new EmojiImageData(
-            copyToArgb(atlasImage),
+            ImageUtil.copyToArgb(atlasImage),
             frameWidth,
             frameHeight,
             frameCount,
@@ -116,21 +117,6 @@ public final class EmojiImageData {
             }
         }
         return frameEndTimesMs.length - 1;
-    }
-
-    private static BufferedImage copyToArgb(BufferedImage image) {
-        if (image == null) {
-            throw new IllegalArgumentException("image cannot be null");
-        }
-        if (image.getType() == BufferedImage.TYPE_INT_ARGB) {
-            return image;
-        }
-
-        BufferedImage argb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = argb.createGraphics();
-        graphics.drawImage(image, 0, 0, null);
-        graphics.dispose();
-        return argb;
     }
 
     private static int[] normalizeDelays(int[] delaysMs) {

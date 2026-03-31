@@ -12,6 +12,7 @@ import java.util.Locale;
 import javax.imageio.ImageIO;
 
 import org.fentanylsolutions.fentlib.util.GifUtil;
+import org.fentanylsolutions.fentlib.util.ImageUtil;
 import org.fentanylsolutions.fentlib.util.QoiUtil;
 import org.fentanylsolutions.fentlib.util.WebpUtil;
 
@@ -167,7 +168,7 @@ public final class EmojiImageLoader {
         int[] delaysMs = new int[frameCount];
 
         for (int i = 0; i < frameCount; i++) {
-            BufferedImage frame = copyToArgb(animation.getFrame(i));
+            BufferedImage frame = ImageUtil.copyToArgb(animation.getFrame(i));
             frames[i] = frame;
             frameWidth = Math.max(frameWidth, frame.getWidth());
             frameHeight = Math.max(frameHeight, frame.getHeight());
@@ -234,7 +235,7 @@ public final class EmojiImageLoader {
     }
 
     private static byte[] encodeCleanPng(BufferedImage image) throws IOException {
-        BufferedImage clean = copyToArgb(image);
+        BufferedImage clean = ImageUtil.copyToArgb(image);
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         if (!ImageIO.write(clean, "png", output)) {
             throw new IOException("Failed to encode PNG");
@@ -281,20 +282,5 @@ public final class EmojiImageLoader {
             }
         }
         return true;
-    }
-
-    private static BufferedImage copyToArgb(BufferedImage image) {
-        if (image == null) {
-            return null;
-        }
-        if (image.getType() == BufferedImage.TYPE_INT_ARGB) {
-            return image;
-        }
-
-        BufferedImage argb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = argb.createGraphics();
-        graphics.drawImage(image, 0, 0, null);
-        graphics.dispose();
-        return argb;
     }
 }
