@@ -120,6 +120,7 @@ public class EmoteClientHandler {
 
     private static final Map<String, PendingDownload> pendingDownloads = new HashMap<>();
     private static final Map<String, List<PendingAlias>> pendingAliases = new HashMap<>();
+    private static final Map<String, String> oneOffTooltipByPua = new HashMap<>();
     private static final Set<String> requestedDownloads = new HashSet<>();
     private static final ArrayDeque<String> queuedDownloads = new ArrayDeque<>();
     private static final Map<String, Long> activeDownloads = new HashMap<>();
@@ -243,7 +244,8 @@ public class EmoteClientHandler {
         }
 
         boolean usable = type == PacketEmoteBroadcast.TYPE_SERVER_PACK;
-        String tooltipText = type == PacketEmoteBroadcast.TYPE_ONE_OFF ? senderName : "";
+        boolean oneOffPua = EmojiPua.isReservedOneOffToken(pua);
+        String tooltipText = (type == PacketEmoteBroadcast.TYPE_ONE_OFF || oneOffPua) ? senderName : "";
         String effectiveCategory = (category != null && !category.isEmpty()) ? category
             : (usable ? "Server" : "Remote");
         Minemoticon.debug(
@@ -259,6 +261,9 @@ public class EmoteClientHandler {
             requestedPuaResolves.remove(pua);
             missingPuas.remove(pua);
             requestedPuaRegistrations.remove(pua);
+            if (rememberOneOffTooltip(pua, tooltipText)) {
+                scheduleChatRefresh();
+            }
             PendingLocalPua pendingLocal = pendingLocalPuas.remove(pua);
             if (pendingLocal != null && checksum != null && !checksum.isEmpty()) {
                 sessionPuasByChecksum.put(checksum, pua);
@@ -441,6 +446,7 @@ public class EmoteClientHandler {
         requestedPuaRegistrations.clear();
         requestedPuaResolves.clear();
         missingPuas.clear();
+        oneOffTooltipByPua.clear();
         clearTransferPayloadCache();
         clearRemoteEmojis(true);
         ClientEmojiHandler.EMOJI_PUA_LOOKUP.clear();
@@ -618,6 +624,9 @@ public class EmoteClientHandler {
     private static void registerRemoteEmoji(String name, String checksum, File cacheFile, String category,
         String namespace, String tooltipText, String pua, boolean usable, boolean isIcon) {
         EmojiFromRemote emoji = new EmojiFromRemote(name, checksum, cacheFile, category, usable, tooltipText);
+        if (rememberOneOffTooltip(pua, tooltipText)) {
+            scheduleChatRefresh();
+        }
         boolean registerAlias = usable || pua == null || pua.isEmpty() || EmojiPua.isReservedOneOffToken(pua);
         if (registerAlias) {
             ClientEmojiHandler.EMOJI_LOOKUP.put(":" + name + ":", emoji);
@@ -646,6 +655,35 @@ public class EmoteClientHandler {
         } else {
             EmojiRenderer.invalidateParseCache();
         }
+    }
+
+    public static String getTooltipTextForPua(String pua) {
+        if (!EmojiPua.isPuaToken(pua)) {
+            return "";
+        }
+        String tooltipText = oneOffTooltipByPua.get(pua);
+        return tooltipText != null ? tooltipText : "";
+    }
+
+    private static boolean rememberOneOffTooltip(String pua, String tooltipText) {
+        if (!EmojiPua.isPuaToken(pua) || tooltipText == null || tooltipText.isEmpty()) {
+            return false;
+        }
+        String previous = oneOffTooltipByPua.put(pua, tooltipText);
+        return !tooltipText.equals(previous);
+    }
+
+    private static void scheduleChatRefresh() {
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (minecraft == null) {
+            return;
+        }
+        minecraft.func_152344_a(() -> {
+            if (minecraft.ingameGUI != null && minecraft.ingameGUI.getChatGUI() != null) {
+                minecraft.ingameGUI.getChatGUI()
+                    .refreshChat();
+            }
+        });
     }
 
     private static String replacementForToken(String token) {

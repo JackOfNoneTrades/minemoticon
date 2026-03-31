@@ -15,4 +15,9 @@ public abstract class MixinGuiNewChat {
     private IChatComponent minemoticon$addEmojiTooltips(IChatComponent component) {
         return ChatEmojiTooltipHelper.withEmojiTooltips(component);
     }
+
+    @ModifyVariable(method = "func_146237_a", at = @At("HEAD"), argsOnly = true, ordinal = 0)
+    private IChatComponent minemoticon$addEmojiTooltipsOnRefresh(IChatComponent component) {
+        return ChatEmojiTooltipHelper.withEmojiTooltips(component);
+    }
 }

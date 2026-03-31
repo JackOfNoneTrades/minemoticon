@@ -12,7 +12,9 @@ import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromPack;
 import org.fentanylsolutions.minemoticon.api.EmojiFromRemote;
 import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
+import org.fentanylsolutions.minemoticon.text.EmojiPua;
 
 public final class ChatEmojiTooltipHelper {
 
@@ -56,10 +58,11 @@ public final class ChatEmojiTooltipHelper {
         for (EmojiRenderer.ParsedSegment segment : segments) {
             if (segment.isEmoji()) {
                 ChatStyle emojiStyle = style.createDeepCopy();
-                emojiStyle.setChatHoverEvent(
-                    new HoverEvent(
-                        HoverEvent.Action.SHOW_TEXT,
-                        new ChatComponentText(getTooltipText(segment.getEmoji()))));
+                String tooltipText = getTooltipText(segment);
+                if (!tooltipText.isEmpty()) {
+                    emojiStyle.setChatHoverEvent(
+                        new HoverEvent(HoverEvent.Action.SHOW_TEXT, new ChatComponentText(tooltipText)));
+                }
                 appendText(rebuilt, segment.getText(), emojiStyle);
             } else if (!segment.getText()
                 .isEmpty()) {
@@ -89,10 +92,18 @@ public final class ChatEmojiTooltipHelper {
         return false;
     }
 
-    private static String getTooltipText(RenderableEmoji emoji) {
+    private static String getTooltipText(EmojiRenderer.ParsedSegment segment) {
+        RenderableEmoji emoji = segment.getEmoji();
         if (emoji instanceof EmojiFromRemote remoteEmoji && !remoteEmoji.getHoverText()
             .isEmpty()) {
             return remoteEmoji.getHoverText();
+        }
+        String puaTooltip = EmoteClientHandler.getTooltipTextForPua(segment.getText());
+        if (!puaTooltip.isEmpty()) {
+            return puaTooltip;
+        }
+        if (EmojiPua.isPuaToken(segment.getText())) {
+            return "";
         }
         if (emoji instanceof EmojiFromPack packEmoji) {
             return "\\" + packEmoji.getNamespaced();
