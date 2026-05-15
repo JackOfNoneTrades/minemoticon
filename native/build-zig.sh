@@ -37,6 +37,25 @@ SUPPORTED_PLATFORMS=(
     windows-x64
 )
 
+resolve_executable_path() {
+    local executable="$1"
+
+    if command -v realpath >/dev/null 2>&1; then
+        realpath "$executable" 2>/dev/null && return 0
+    fi
+
+    if command -v readlink >/dev/null 2>&1; then
+        local resolved
+        resolved="$(readlink -f "$executable" 2>/dev/null || true)"
+        if [[ -n "$resolved" ]]; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+    fi
+
+    printf '%s\n' "$executable"
+}
+
 resolve_java_home() {
     if [[ -n "${JAVA_HOME:-}" ]]; then
         printf '%s\n' "$JAVA_HOME"
@@ -54,7 +73,7 @@ resolve_java_home() {
 
     if command -v javac >/dev/null 2>&1; then
         local javac_bin javac_dir
-        javac_bin="$(command -v javac)"
+        javac_bin="$(resolve_executable_path "$(command -v javac)")"
         javac_dir="$(cd "$(dirname "$javac_bin")/.." && pwd)"
         printf '%s\n' "$javac_dir"
         return 0
