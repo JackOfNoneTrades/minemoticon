@@ -122,6 +122,7 @@ public class EmoteServerHandler {
     private static final Map<String, Set<String>> leasedPuasByOwner = new ConcurrentHashMap<>();
     private static final Map<String, String> leasedPuaOwners = new ConcurrentHashMap<>();
     private static final Map<String, CachedEmote> oneOffCacheByPua = new ConcurrentHashMap<>();
+    private static final Map<String, String> canonicalPuaByOwnerPua = new ConcurrentHashMap<>();
     private static final AtomicInteger nextOneOffPuaSlot = new AtomicInteger();
 
     public static void bootstrapPersistentStore() {
@@ -183,7 +184,9 @@ public class EmoteServerHandler {
             finalizeConsumedPua(sender, pua);
             refillPuas(player);
             PersistentEmoteStore.BroadcastAlias alias = PersistentEmoteStore.getAliasForOwnerChecksum(sender, checksum);
-            broadcastAlias(name, namespace, checksum, sender, null, alias != null ? alias.pua : pua);
+            String canonicalPua = alias != null ? alias.pua : pua;
+            rememberCanonicalPua(sender, pua, canonicalPua);
+            broadcastAlias(name, namespace, checksum, sender, null, canonicalPua);
             return;
         }
 
@@ -299,6 +302,8 @@ public class EmoteServerHandler {
         pendingUploads.keySet()
             .removeIf(key -> key.startsWith(prefix));
         downloadQueues.remove(player.getCommandSenderName());
+        canonicalPuaByOwnerPua.keySet()
+            .removeIf(key -> key.startsWith(prefix));
         availablePuasByOwner.remove(owner);
         Set<String> leased = leasedPuasByOwner.remove(owner);
         if (leased != null) {
@@ -318,6 +323,26 @@ public class EmoteServerHandler {
 
     public static void sendPuaLeasesToPlayer(EntityPlayerMP player) {
         refillPuas(player);
+    }
+
+    public static void sendPersistentAliasesToPlayer(EntityPlayerMP player) {
+        String owner = player.getCommandSenderName();
+        for (PersistentEmoteStore.BroadcastAlias alias : PersistentEmoteStore.getAllAliases()) {
+            if (!owner.equals(alias.owner) || !EmojiPua.isPuaToken(alias.pua)) {
+                continue;
+            }
+            NetworkHandler.INSTANCE.sendTo(
+                new PacketEmoteBroadcast(
+                    alias.name,
+                    alias.checksum,
+                    alias.owner,
+                    PacketEmoteBroadcast.TYPE_CLIENT_EMOTE,
+                    "",
+                    alias.namespace,
+                    alias.pua,
+                    false),
+                player);
+        }
     }
 
     public static void resyncPersistentCustomEmotes() {
@@ -452,13 +477,59 @@ public class EmoteServerHandler {
         refillPuas(player);
         PersistentEmoteStore.BroadcastAlias alias = PersistentEmoteStore
             .getAliasForOwnerChecksum(pending.senderName, checksum);
-        broadcastAlias(
-            pending.name,
-            pending.namespace,
-            checksum,
-            pending.senderName,
-            null,
-            alias != null ? alias.pua : pending.pua);
+        String canonicalPua = alias != null ? alias.pua : pending.pua;
+        rememberCanonicalPua(pending.senderName, pending.pua, canonicalPua);
+        broadcastAlias(pending.name, pending.namespace, checksum, pending.senderName, null, canonicalPua);
+    }
+
+    public static String canonicalizePlayerText(String owner, String text) {
+        if (owner == null || owner.isEmpty() || text == null || text.isEmpty()) {
+            return text;
+        }
+        return PersistentEmoteStore.canonicalizeText(owner, canonicalizePuaRedirects(owner, text));
+    }
+
+    private static void rememberCanonicalPua(String owner, String requestedPua, String canonicalPua) {
+        if (owner == null || owner.isEmpty()
+            || !EmojiPua.isPuaToken(requestedPua)
+            || !EmojiPua.isPuaToken(canonicalPua)
+            || requestedPua.equals(canonicalPua)) {
+            return;
+        }
+        canonicalPuaByOwnerPua.put(uploadKey(owner, requestedPua), canonicalPua);
+    }
+
+    private static String canonicalizePuaRedirects(String owner, String text) {
+        StringBuilder rewritten = null;
+        int lastCopied = 0;
+        for (int i = 0; i < text.length();) {
+            String pua = EmojiPua.tokenAt(text, i);
+            if (pua == null) {
+                i++;
+                continue;
+            }
+
+            String canonical = canonicalPuaByOwnerPua.get(uploadKey(owner, pua));
+            if (EmojiPua.isPuaToken(canonical) && !canonical.equals(pua)) {
+                if (rewritten == null) {
+                    rewritten = new StringBuilder(text.length());
+                }
+                if (i > lastCopied) {
+                    rewritten.append(text, lastCopied, i);
+                }
+                rewritten.append(canonical);
+                lastCopied = i + EmojiPua.TOKEN_LENGTH;
+            }
+            i += EmojiPua.TOKEN_LENGTH;
+        }
+
+        if (rewritten == null) {
+            return text;
+        }
+        if (lastCopied < text.length()) {
+            rewritten.append(text, lastCopied, text.length());
+        }
+        return rewritten.toString();
     }
 
     private static byte[] sanitize(byte[] raw, String sourceName, boolean enforceMaxDimension) {

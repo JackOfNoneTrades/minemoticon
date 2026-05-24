@@ -48,6 +48,7 @@ public class CommonProxy {
             NetworkHandler.INSTANCE.sendTo(new PacketServerPresence(), player);
             EmoteServerHandler.sendServerPacksToPlayer(player);
             EmoteServerHandler.sendOneOffsToPlayer(player);
+            EmoteServerHandler.sendPersistentAliasesToPlayer(player);
             EmoteServerHandler.sendPuaLeasesToPlayer(player);
         }
     }

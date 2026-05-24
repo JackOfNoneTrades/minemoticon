@@ -6,6 +6,8 @@ import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.inventory.ContainerRepair;
 
 import org.fentanylsolutions.minemoticon.gui.EmojiPickerGui;
+import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
+import org.fentanylsolutions.minemoticon.text.EmojiPua;
 import org.lwjgl.input.Mouse;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -75,6 +77,7 @@ public abstract class MixinGuiRepair extends GuiContainer {
         if (insertText != null) {
             field_147091_w.setFocused(true);
             field_147091_w.writeText(insertText);
+            minemoticon$registerInsertedPua(insertText);
             func_147090_g();
             ci.cancel();
             return;
@@ -94,6 +97,7 @@ public abstract class MixinGuiRepair extends GuiContainer {
             if (text != null) {
                 field_147091_w.setFocused(true);
                 field_147091_w.writeText(text);
+                minemoticon$registerInsertedPua(text);
                 func_147090_g();
             }
             ci.cancel();
@@ -104,6 +108,13 @@ public abstract class MixinGuiRepair extends GuiContainer {
     private boolean canInput() {
         return field_147092_v.getSlot(0)
             .getHasStack();
+    }
+
+    @Unique
+    private void minemoticon$registerInsertedPua(String text) {
+        if (EmojiPua.isPuaToken(text)) {
+            EmoteClientHandler.onPuaObserved(text);
+        }
     }
 
     @Unique

@@ -265,8 +265,16 @@ public class EmoteClientHandler {
             requestedPuaResolves.remove(pua);
             missingPuas.remove(pua);
             requestedPuaRegistrations.remove(pua);
+            boolean handledPendingLocalAlias = false;
+            if (type == PacketEmoteBroadcast.TYPE_CLIENT_EMOTE && isLocalPlayerAlias(senderName)) {
+                rememberSessionPua(checksum, pua);
+                handledPendingLocalAlias = remapPendingLocalForChecksum(checksum, pua);
+            }
             if (rememberOneOffTooltip(pua, tooltipText)) {
                 scheduleChatRefresh();
+            }
+            if (handledPendingLocalAlias) {
+                return;
             }
             PendingLocalPua pendingLocal = pendingLocalPuas.remove(pua);
             if (pendingLocal != null && checksum != null && !checksum.isEmpty()) {
@@ -383,6 +391,43 @@ public class EmoteClientHandler {
 
         missingPuas.remove(pua);
         onEmoteBroadcast(name, checksum, senderName, PacketEmoteBroadcast.TYPE_CLIENT_EMOTE, "", namespace, pua, false);
+    }
+
+    private static boolean isLocalPlayerAlias(String senderName) {
+        Minecraft minecraft = Minecraft.getMinecraft();
+        return minecraft != null && minecraft.thePlayer != null
+            && senderName != null
+            && senderName.equals(minecraft.thePlayer.getCommandSenderName());
+    }
+
+    private static void rememberSessionPua(String checksum, String pua) {
+        if (!EmoteTransferLimits.isValidChecksum(checksum) || !EmojiPua.isPuaToken(pua)) {
+            return;
+        }
+        sessionPuasByChecksum.put(checksum, pua);
+    }
+
+    private static boolean remapPendingLocalForChecksum(String checksum, String pua) {
+        if (!EmoteTransferLimits.isValidChecksum(checksum) || !EmojiPua.isPuaToken(pua)) {
+            return false;
+        }
+        boolean remapped = false;
+        Iterator<Map.Entry<String, PendingLocalPua>> iterator = pendingLocalPuas.entrySet()
+            .iterator();
+        while (iterator.hasNext()) {
+            PendingLocalPua pending = iterator.next()
+                .getValue();
+            if (!checksum.equals(pending.checksum)) {
+                continue;
+            }
+            requestedPuaRegistrations.remove(pending.pua);
+            requestedPuaResolves.remove(pending.pua);
+            missingPuas.remove(pending.pua);
+            sessionPuasByPackKey.put(pending.pack.getNamespaced(), pua);
+            iterator.remove();
+            remapped = true;
+        }
+        return remapped;
     }
 
     public static void onPuaObserved(String pua) {
