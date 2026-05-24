@@ -499,9 +499,9 @@ public class EmoteServerHandler {
         }
     }
 
-    private static void broadcastToAll(String name, CachedEmote cached) {
+    private static void broadcastToAll(CachedEmote cached) {
         PacketEmoteBroadcast packet = new PacketEmoteBroadcast(
-            name,
+            cached.name,
             cached.checksum,
             cached.sender,
             cached.type,
@@ -682,7 +682,7 @@ public class EmoteServerHandler {
                     String checksum = sha1(sanitized);
                     boolean isIcon = entry.name.equals(iconName);
                     emoteCache.put(
-                        entry.name,
+                        serverPackCacheKey(pack.folderName, entry.name),
                         new CachedEmote(
                             entry.name,
                             checksum,
@@ -716,7 +716,7 @@ public class EmoteServerHandler {
         int count = 0;
         for (Map.Entry<String, CachedEmote> entry : emoteCache.entrySet()) {
             if (entry.getValue().type == PacketEmoteBroadcast.TYPE_SERVER_PACK) {
-                broadcastToAll(entry.getKey(), entry.getValue());
+                broadcastToAll(entry.getValue());
                 count++;
             }
         }
@@ -729,7 +729,7 @@ public class EmoteServerHandler {
                 CachedEmote cached = entry.getValue();
                 NetworkHandler.INSTANCE.sendTo(
                     new PacketEmoteBroadcast(
-                        entry.getKey(),
+                        cached.name,
                         cached.checksum,
                         "",
                         PacketEmoteBroadcast.TYPE_SERVER_PACK,
@@ -790,7 +790,7 @@ public class EmoteServerHandler {
         if (EmojiPua.isPuaToken(pua)) {
             oneOffCacheByPua.put(pua, cached);
         }
-        broadcastToAll(name, cached);
+        broadcastToAll(cached);
         Minemoticon.debug("Registered one-off emote: {} (checksum {}, pua={})", name, checksum, pua);
     }
 
@@ -942,6 +942,10 @@ public class EmoteServerHandler {
 
     private static String uploadKey(String owner, String pua) {
         return owner + ":" + pua;
+    }
+
+    private static String serverPackCacheKey(String namespace, String name) {
+        return (namespace != null && !namespace.isEmpty() ? namespace : "server") + "/" + name;
     }
 
 }
