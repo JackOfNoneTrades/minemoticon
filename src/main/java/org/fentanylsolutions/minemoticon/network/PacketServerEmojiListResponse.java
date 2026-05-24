@@ -39,7 +39,8 @@ public class PacketServerEmojiListResponse implements IMessage {
         usedCount = buf.readInt();
         quotaCount = buf.readInt();
         statusMessage = ByteBufUtils.readUTF8String(buf);
-        int count = buf.readInt();
+        int count = EmoteTransferLimits
+            .readBoundedCount(buf, EmoteTransferLimits.MAX_SERVER_EMOJI_LIST_ENTRIES, "server emoji list");
         entries = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             entries.add(

@@ -38,9 +38,7 @@ public class PacketEmoteDataUpload implements IMessage {
         pua = ByteBufUtils.readUTF8String(buf);
         chunkIndex = buf.readInt();
         totalChunks = buf.readInt();
-        int len = buf.readInt();
-        data = new byte[len];
-        buf.readBytes(data);
+        data = EmoteTransferLimits.readChunk(buf);
     }
 
     @Override
@@ -51,8 +49,7 @@ public class PacketEmoteDataUpload implements IMessage {
         ByteBufUtils.writeUTF8String(buf, pua);
         buf.writeInt(chunkIndex);
         buf.writeInt(totalChunks);
-        buf.writeInt(data.length);
-        buf.writeBytes(data);
+        EmoteTransferLimits.writeChunk(buf, data);
     }
 
     public static class Handler implements IMessageHandler<PacketEmoteDataUpload, IMessage> {
