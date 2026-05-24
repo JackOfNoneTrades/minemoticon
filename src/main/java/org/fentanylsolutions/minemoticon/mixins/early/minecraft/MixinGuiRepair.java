@@ -37,7 +37,7 @@ public abstract class MixinGuiRepair extends GuiContainer {
     private void minemoticon$initGui(CallbackInfo ci) {
         int btnX = guiLeft + 62 + 103 + 13;
         int btnY = guiTop + 24;
-        minemoticon$picker = new EmojiPickerGui(field_147091_w, fontRendererObj, width, height, btnX, btnY);
+        minemoticon$picker = new EmojiPickerGui(field_147091_w, fontRendererObj, width, height, btnX, btnY, false);
     }
 
     @Inject(method = "drawScreen", at = @At("TAIL"))

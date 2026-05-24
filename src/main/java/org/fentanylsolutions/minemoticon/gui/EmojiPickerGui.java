@@ -38,6 +38,7 @@ public class EmojiPickerGui {
     private final FontRenderer font;
     private final GuiTextField searchField;
     private final int screenHeight;
+    private final boolean configButtonEnabled;
 
     private boolean open;
     private RenderableEmoji buttonEmoji;
@@ -81,9 +82,27 @@ public class EmojiPickerGui {
     }
 
     public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight,
+        boolean configButtonEnabled) {
+        this(
+            chatInput,
+            font,
+            screenWidth,
+            screenHeight,
+            screenWidth - CELL - 2,
+            screenHeight - CELL,
+            configButtonEnabled);
+    }
+
+    public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight,
         int customButtonX, int customButtonY) {
+        this(chatInput, font, screenWidth, screenHeight, customButtonX, customButtonY, true);
+    }
+
+    public EmojiPickerGui(GuiTextField chatInput, FontRenderer font, int screenWidth, int screenHeight,
+        int customButtonX, int customButtonY, boolean configButtonEnabled) {
         this.font = font;
         this.screenHeight = screenHeight;
+        this.configButtonEnabled = configButtonEnabled;
 
         gridW = COLS * CELL;
         gridH = ROWS * CELL;
@@ -114,17 +133,20 @@ public class EmojiPickerGui {
         var lookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":" + EmojiConfig.pickerButtonEmoji + ":");
         if (lookup instanceof RenderableEmoji r) buttonEmoji = r;
 
-        var gearLookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":gear:");
-        if (gearLookup instanceof RenderableEmoji r) gearEmoji = r;
+        if (configButtonEnabled) {
+            var gearLookup = ClientEmojiHandler.EMOJI_LOOKUP.get(":gear:");
+            if (gearLookup instanceof RenderableEmoji r) gearEmoji = r;
+        }
 
         gearX = panelX + panelW - PAD - CELL;
         gearY = panelY + PAD;
 
+        int configButtonSpace = gearEmoji != null ? CELL + GAP : 0;
         searchField = new GuiTextField(
             font,
             panelX + PAD + 2,
             panelY + PAD + 2,
-            panelW - PAD * 2 - CELL - GAP - 4,
+            panelW - PAD * 2 - configButtonSpace - 4,
             SEARCH_H - 4);
         searchField.setMaxStringLength(50);
     }
@@ -210,16 +232,16 @@ public class EmojiPickerGui {
         Gui.drawRect(panelX, panelY, panelX + panelW, panelY + panelH, 0xD0000000);
 
         Gui.drawRect(
-            panelX + PAD - 1,
-            panelY + PAD - 1,
-            panelX + panelW - PAD - CELL - GAP,
-            panelY + PAD + SEARCH_H - 1,
+            searchField.xPosition - 3,
+            searchField.yPosition - 3,
+            searchField.xPosition + searchField.width + 2,
+            searchField.yPosition + searchField.height + 1,
             0xFF333333);
         searchField.drawTextBox();
 
         // Gear button with light gray border matching GuiTextField style
         // Match the search field's visual box: outer at (x-1,y-1,x+w+1,y+h+1), inner at (x,y,x+w,y+h)
-        if (gearEmoji != null) {
+        if (configButtonEnabled && gearEmoji != null) {
             int gfy = panelY + PAD + 2;
             int gfs = SEARCH_H - 4; // square size (10px), matches search field height
             int gfx = gearX + (CELL - gfs) / 2; // center horizontally in the allocated space
@@ -488,7 +510,11 @@ public class EmojiPickerGui {
         int gfy = panelY + PAD + 2;
         int gfs = SEARCH_H - 4;
         int gfx = gearX + (CELL - gfs) / 2;
-        if (mouseX >= gfx - 1 && mouseX < gfx + gfs + 1 && mouseY >= gfy - 1 && mouseY < gfy + gfs + 1) {
+        if (configButtonEnabled && gearEmoji != null
+            && mouseX >= gfx - 1
+            && mouseX < gfx + gfs + 1
+            && mouseY >= gfy - 1
+            && mouseY < gfy + gfs + 1) {
             openConfig = true;
             toggle();
             return null;

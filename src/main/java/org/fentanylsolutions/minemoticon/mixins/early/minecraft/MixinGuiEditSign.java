@@ -31,7 +31,7 @@ public class MixinGuiEditSign extends GuiScreen {
 
     @Inject(method = "initGui", at = @At("TAIL"))
     private void minemoticon$initGui(CallbackInfo ci) {
-        minemoticon$picker = new EmojiPickerGui(null, fontRendererObj, width, height);
+        minemoticon$picker = new EmojiPickerGui(null, fontRendererObj, width, height, false);
     }
 
     @Inject(method = "drawScreen", at = @At("TAIL"))
