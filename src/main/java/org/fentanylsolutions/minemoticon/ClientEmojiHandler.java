@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 
+import net.minecraft.client.Minecraft;
+
 import org.fentanylsolutions.minemoticon.api.Emoji;
 import org.fentanylsolutions.minemoticon.api.EmojiFromAtlas;
 import org.fentanylsolutions.minemoticon.api.EmojiFromFont;
@@ -132,10 +134,13 @@ public class ClientEmojiHandler {
             new Thread(() -> {
                 String updated = downloadEmojiJsonUpdate();
                 if (updated != null) {
-                    clearTwemojiData();
-                    parseTwemojis(updated);
-                    buildPickerData();
-                    Minemoticon.LOG.info("Updated emoji data, now {} emojis", EMOJI_LIST.size());
+                    Minecraft.getMinecraft()
+                        .func_152344_a(() -> {
+                            clearTwemojiData();
+                            parseTwemojis(updated);
+                            buildPickerData();
+                            Minemoticon.LOG.info("Updated emoji data, now {} emojis", EMOJI_LIST.size());
+                        });
                 }
             }, "Minemoticon Emoji Updater").start();
         }
