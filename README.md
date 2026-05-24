@@ -96,7 +96,7 @@ To update the bundled emoji data and font:
 
 ## License
 
-[LGPLv3 + SNEED](LICENSE)
+`LGPLv3`.
 
 ## Buy me a coffee
 
@@ -105,4 +105,4 @@ To update the bundled emoji data and font:
 
 <br>
 
-![license](images/lgplsneed_small.png)
+![license](images/license_small.png)
