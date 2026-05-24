@@ -6,6 +6,7 @@ import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.inventory.ContainerRepair;
 
 import org.fentanylsolutions.minemoticon.gui.EmojiPickerGui;
+import org.fentanylsolutions.minemoticon.gui.EmojiSuggestionHelper;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.text.EmojiPua;
 import org.lwjgl.input.Mouse;
@@ -45,6 +46,9 @@ public abstract class MixinGuiRepair extends GuiContainer {
     @Unique
     private EmojiPickerGui minemoticon$picker;
 
+    @Unique
+    private EmojiSuggestionHelper minemoticon$suggestions;
+
     private MixinGuiRepair() {
         super(null);
     }
@@ -55,11 +59,30 @@ public abstract class MixinGuiRepair extends GuiContainer {
         int btnX = buttonPos[0];
         int btnY = buttonPos[1];
         minemoticon$picker = new EmojiPickerGui(field_147091_w, fontRendererObj, width, height, btnX, btnY, false);
+        minemoticon$suggestions = new EmojiSuggestionHelper(
+            field_147091_w,
+            fontRendererObj,
+            false,
+            false,
+            width,
+            height);
     }
 
     @Inject(method = "drawScreen", at = @At("TAIL"))
     private void minemoticon$drawScreen(int mouseX, int mouseY, float partialTicks, CallbackInfo ci) {
-        if (minemoticon$picker == null || !canInput()) return;
+        if (!canInput()) {
+            if (minemoticon$suggestions != null) {
+                minemoticon$suggestions.dismiss();
+            }
+            return;
+        }
+
+        if (minemoticon$suggestions != null) {
+            minemoticon$suggestions.update();
+            minemoticon$suggestions.render(mouseX, mouseY);
+        }
+
+        if (minemoticon$picker == null) return;
 
         int dwheel = Mouse.getDWheel();
         if (dwheel != 0 && minemoticon$picker.isOpen()) {
@@ -71,7 +94,16 @@ public abstract class MixinGuiRepair extends GuiContainer {
 
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void minemoticon$mouseClicked(int mouseX, int mouseY, int button, CallbackInfo ci) {
-        if (minemoticon$picker == null || !canInput()) return;
+        if (!canInput()) return;
+
+        if (minemoticon$suggestions != null && minemoticon$suggestions.mouseClicked(mouseX, mouseY, button)) {
+            field_147091_w.setFocused(true);
+            minemoticon$syncSuggestionInsert();
+            ci.cancel();
+            return;
+        }
+
+        if (minemoticon$picker == null) return;
 
         String insertText = minemoticon$picker.mouseClicked(mouseX, mouseY, button);
         if (insertText != null) {
@@ -92,6 +124,15 @@ public abstract class MixinGuiRepair extends GuiContainer {
 
     @Inject(method = "keyTyped", at = @At("HEAD"), cancellable = true)
     private void minemoticon$keyTyped(char c, int keyCode, CallbackInfo ci) {
+        if (minemoticon$suggestions != null && canInput()
+            && minemoticon$suggestions.isActive()
+            && minemoticon$suggestions.keyTyped(c, keyCode)) {
+            field_147091_w.setFocused(true);
+            minemoticon$syncSuggestionInsert();
+            ci.cancel();
+            return;
+        }
+
         if (minemoticon$picker != null && canInput() && minemoticon$picker.keyTyped(c, keyCode)) {
             String text = minemoticon$picker.consumeInsertText();
             if (text != null) {
@@ -102,6 +143,16 @@ public abstract class MixinGuiRepair extends GuiContainer {
             }
             ci.cancel();
         }
+    }
+
+    @Unique
+    private void minemoticon$syncSuggestionInsert() {
+        String text = minemoticon$suggestions.consumeInsertText();
+        if (text == null) {
+            return;
+        }
+        minemoticon$registerInsertedPua(text);
+        func_147090_g();
     }
 
     @Unique

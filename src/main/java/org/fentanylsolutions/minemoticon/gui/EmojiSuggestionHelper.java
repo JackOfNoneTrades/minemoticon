@@ -21,26 +21,130 @@ public class EmojiSuggestionHelper {
     private static final int ROW_HEIGHT = 12;
     private static final int MIN_QUERY_LENGTH = 2;
 
-    private final GuiTextField inputField;
+    public interface TextInput {
+
+        String getText();
+
+        int getCursorPosition();
+
+        boolean setText(String text);
+
+        void setCursorPosition(int position);
+
+        int getX();
+
+        int getY();
+
+        int getHeight();
+
+        int getVisibleWidth();
+
+        int getScrollOffset();
+
+        boolean hasBackground();
+    }
+
+    private static class GuiTextFieldInput implements TextInput {
+
+        private final GuiTextField inputField;
+
+        GuiTextFieldInput(GuiTextField inputField) {
+            this.inputField = inputField;
+        }
+
+        @Override
+        public String getText() {
+            return inputField.getText();
+        }
+
+        @Override
+        public int getCursorPosition() {
+            return inputField.getCursorPosition();
+        }
+
+        @Override
+        public boolean setText(String text) {
+            inputField.setText(text);
+            return true;
+        }
+
+        @Override
+        public void setCursorPosition(int position) {
+            inputField.setCursorPosition(position);
+        }
+
+        @Override
+        public int getX() {
+            return inputField.xPosition;
+        }
+
+        @Override
+        public int getY() {
+            return inputField.yPosition;
+        }
+
+        @Override
+        public int getHeight() {
+            return inputField.height;
+        }
+
+        @Override
+        public int getVisibleWidth() {
+            return inputField.getWidth();
+        }
+
+        @Override
+        public int getScrollOffset() {
+            return ((AccessorGuiTextField) inputField).getLineScrollOffset();
+        }
+
+        @Override
+        public boolean hasBackground() {
+            return inputField.getEnableBackgroundDrawing();
+        }
+    }
+
+    private final TextInput input;
     private final FontRenderer font;
+    private final boolean appendTrailingSpace;
+    private final boolean renderAbove;
+    private final int screenWidth;
+    private final int screenHeight;
 
     private List<Emoji> suggestions = new ArrayList<>();
     private int selectedIndex = 0;
     private String lastInputText = "";
+    private int lastCursorPosition = -1;
+    private String lastInsertedText;
     private int colonStart = -1; // position of the ':' that started the query
     private boolean active;
 
     public EmojiSuggestionHelper(GuiTextField inputField, FontRenderer font) {
-        this.inputField = inputField;
+        this(inputField, font, true, true, 0, 0);
+    }
+
+    public EmojiSuggestionHelper(GuiTextField inputField, FontRenderer font, boolean appendTrailingSpace,
+        boolean renderAbove, int screenWidth, int screenHeight) {
+        this(new GuiTextFieldInput(inputField), font, appendTrailingSpace, renderAbove, screenWidth, screenHeight);
+    }
+
+    public EmojiSuggestionHelper(TextInput input, FontRenderer font, boolean appendTrailingSpace, boolean renderAbove,
+        int screenWidth, int screenHeight) {
+        this.input = input;
         this.font = font;
+        this.appendTrailingSpace = appendTrailingSpace;
+        this.renderAbove = renderAbove;
+        this.screenWidth = screenWidth;
+        this.screenHeight = screenHeight;
     }
 
     public void update() {
-        String text = inputField.getText();
-        if (text.equals(lastInputText)) return;
+        String text = input.getText();
+        int cursor = Math.max(0, Math.min(input.getCursorPosition(), text.length()));
+        if (text.equals(lastInputText) && cursor == lastCursorPosition) return;
         lastInputText = text;
+        lastCursorPosition = cursor;
 
-        int cursor = inputField.getCursorPosition();
         colonStart = -1;
         active = false;
         suggestions.clear();
@@ -120,21 +224,11 @@ public class EmojiSuggestionHelper {
         int scrollOffset = getScrollOffset();
         String visibleText = getVisibleText(scrollOffset);
         int textY = getTextRenderY();
-        EmojiRenderer.bypass = true;
-        int popupW = 0;
-        for (Emoji e : suggestions) {
-            String label = e.getShorterString();
-            if (hasNameCollision(e)) label += " (" + e.category + ")";
-            int w = font.getStringWidth(label) + 16;
-            if (w > popupW) popupW = w;
-        }
-        popupW = Math.max(popupW, 60);
-        EmojiRenderer.bypass = false;
 
-        // Position above the input field, aligned with the colon
-        int popupX = getRenderedTextX(colonStart, scrollOffset, visibleText);
+        int popupW = getPopupWidth();
+        int popupX = getPopupX(colonStart, scrollOffset, visibleText, popupW);
         int popupH = count * ROW_HEIGHT;
-        int popupY = inputField.yPosition - popupH - 2;
+        int popupY = getPopupY(popupH);
 
         // Background
         Gui.drawRect(popupX - 2, popupY - 2, popupX + popupW + 2, popupY + popupH, 0xE0000000);
@@ -174,12 +268,13 @@ public class EmojiSuggestionHelper {
         if (selectedIndex < suggestions.size()) {
             String full = suggestions.get(selectedIndex)
                 .getShorterString();
-            String typed = ":" + inputField.getText()
-                .substring(colonStart + 1, inputField.getCursorPosition());
+            String text = input.getText();
+            int cursor = Math.max(0, Math.min(input.getCursorPosition(), text.length()));
+            String typed = ":" + text.substring(colonStart + 1, cursor);
             if (full.toLowerCase()
                 .startsWith(typed.toLowerCase())) {
                 String ghost = full.substring(typed.length());
-                int cursorX = getRenderedTextX(inputField.getCursorPosition(), scrollOffset, visibleText);
+                int cursorX = getRenderedTextX(cursor, scrollOffset, visibleText);
                 if (cursorX >= 0) {
                     EmojiRenderer.bypass = true;
                     font.drawString(ghost, cursorX, textY, 0x808080);
@@ -195,17 +290,10 @@ public class EmojiSuggestionHelper {
         int count = suggestions.size();
         int scrollOffset = getScrollOffset();
         String visibleText = getVisibleText(scrollOffset);
-        EmojiRenderer.bypass = true;
-        int popupW = 0;
-        for (Emoji e : suggestions) {
-            int w = font.getStringWidth(e.getShorterString()) + 16;
-            if (w > popupW) popupW = w;
-        }
-        popupW = Math.max(popupW, 60);
-        EmojiRenderer.bypass = false;
-        int popupX = getRenderedTextX(colonStart, scrollOffset, visibleText);
+        int popupW = getPopupWidth();
+        int popupX = getPopupX(colonStart, scrollOffset, visibleText, popupW);
         int popupH = count * ROW_HEIGHT;
-        int popupY = inputField.yPosition - popupH - 2;
+        int popupY = getPopupY(popupH);
 
         if (mouseX >= popupX - 2 && mouseX < popupX + popupW + 2 && mouseY >= popupY - 2 && mouseY < popupY + popupH) {
             int idx = (mouseY - popupY) / ROW_HEIGHT;
@@ -245,53 +333,92 @@ public class EmojiSuggestionHelper {
     }
 
     private void applySuggestion() {
+        lastInsertedText = null;
         if (selectedIndex >= suggestions.size()) return;
 
         Emoji emoji = suggestions.get(selectedIndex);
-        String text = inputField.getText();
-        int cursor = inputField.getCursorPosition();
+        String text = input.getText();
+        int cursor = Math.max(0, Math.min(input.getCursorPosition(), text.length()));
 
         // Replace from colonStart to cursor with the emoji insert text
         String before = text.substring(0, colonStart);
         String after = text.substring(cursor);
-        String insert = EmoteClientHandler.getInsertTextForEmoji(emoji) + " ";
+        String emojiText = EmoteClientHandler.getInsertTextForEmoji(emoji);
+        String insert = appendTrailingSpace ? emojiText + " " : emojiText;
 
-        inputField.setText(before + insert + after);
-        inputField.setCursorPosition(before.length() + insert.length());
+        if (!input.setText(before + insert + after)) {
+            dismiss();
+            return;
+        }
+        input.setCursorPosition(before.length() + insert.length());
+        lastInsertedText = emojiText;
 
         dismiss();
     }
 
-    private void dismiss() {
+    public String consumeInsertText() {
+        String inserted = lastInsertedText;
+        lastInsertedText = null;
+        return inserted;
+    }
+
+    public void dismiss() {
         active = false;
         suggestions.clear();
         colonStart = -1;
     }
 
     private int getScrollOffset() {
-        return ((AccessorGuiTextField) inputField).getLineScrollOffset();
+        return input.getScrollOffset();
     }
 
     private String getVisibleText(int scrollOffset) {
-        int safeOffset = Math.max(
-            0,
-            Math.min(
-                scrollOffset,
-                inputField.getText()
-                    .length()));
-        return font.trimStringToWidth(
-            inputField.getText()
-                .substring(safeOffset),
-            inputField.getWidth());
+        String text = input.getText();
+        int safeOffset = Math.max(0, Math.min(scrollOffset, text.length()));
+        return font.trimStringToWidth(text.substring(safeOffset), input.getVisibleWidth());
     }
 
     private int getTextRenderX() {
-        return inputField.getEnableBackgroundDrawing() ? inputField.xPosition + 4 : inputField.xPosition;
+        return input.hasBackground() ? input.getX() + 4 : input.getX();
     }
 
     private int getTextRenderY() {
-        return inputField.getEnableBackgroundDrawing() ? inputField.yPosition + (inputField.height - 8) / 2
-            : inputField.yPosition;
+        return input.hasBackground() ? input.getY() + (input.getHeight() - 8) / 2 : input.getY();
+    }
+
+    private int getPopupWidth() {
+        EmojiRenderer.bypass = true;
+        int popupW = 0;
+        for (Emoji e : suggestions) {
+            String label = e.getShorterString();
+            if (hasNameCollision(e)) label += " (" + e.category + ")";
+            int w = font.getStringWidth(label) + 16;
+            if (w > popupW) popupW = w;
+        }
+        EmojiRenderer.bypass = false;
+        return Math.max(popupW, 60);
+    }
+
+    private int getPopupX(int textIndex, int scrollOffset, String visibleText, int popupW) {
+        int popupX = getRenderedTextX(textIndex, scrollOffset, visibleText);
+        if (screenWidth <= 0) {
+            return popupX;
+        }
+        return Math.max(2, Math.min(popupX, screenWidth - popupW - 2));
+    }
+
+    private int getPopupY(int popupH) {
+        int popupY = renderAbove ? input.getY() - popupH - 2 : input.getY() + input.getHeight() + 2;
+        if (screenHeight <= 0) {
+            return popupY;
+        }
+        if (popupY < 2) {
+            popupY = input.getY() + input.getHeight() + 2;
+        }
+        if (popupY + popupH > screenHeight - 2) {
+            popupY = input.getY() - popupH - 2;
+        }
+        return Math.max(2, Math.min(popupY, screenHeight - popupH - 2));
     }
 
     private int getRenderedTextX(int textIndex, int scrollOffset, String visibleText) {
