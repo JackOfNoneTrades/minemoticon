@@ -26,7 +26,6 @@ import org.fentanylsolutions.minemoticon.text.EmojiPua;
 
 public class EmoteServerHandler {
 
-    private static final int CHUNK_SIZE = 30000;
     private static final int MAX_DIMENSION = 128;
     private static final int MAX_QUEUED_DOWNLOADS_PER_PLAYER = 256;
     private static final int MAX_CHUNKS_PER_TICK_PER_PLAYER = 2;
@@ -261,7 +260,7 @@ public class EmoteServerHandler {
     }
 
     public static void onDownloadRequest(EntityPlayerMP player, String checksum) {
-        if (checksum == null || checksum.isEmpty()) {
+        if (!EmoteTransferLimits.isValidChecksum(checksum)) {
             return;
         }
         if (!PersistentEmoteStore.hasAsset(checksum) && findCachedByChecksum(checksum) == null) {
@@ -578,21 +577,22 @@ public class EmoteServerHandler {
             }
         }
 
-        if (data == null) {
+        if (data == null || data.length <= 0) {
             return null;
         }
 
         PendingDownload pending = new PendingDownload(checksum);
         pending.data = data;
-        pending.totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        pending.totalChunks = (data.length + EmoteTransferLimits.CHUNK_SIZE_BYTES - 1)
+            / EmoteTransferLimits.CHUNK_SIZE_BYTES;
         return pending;
     }
 
     private static int sendNextChunks(EntityPlayerMP player, PendingDownload pending, int budgetChunks) {
         int sent = 0;
         while (sent < budgetChunks && pending.nextChunkIndex < pending.totalChunks) {
-            int start = pending.nextChunkIndex * CHUNK_SIZE;
-            int end = Math.min(start + CHUNK_SIZE, pending.data.length);
+            int start = pending.nextChunkIndex * EmoteTransferLimits.CHUNK_SIZE_BYTES;
+            int end = Math.min(start + EmoteTransferLimits.CHUNK_SIZE_BYTES, pending.data.length);
             byte[] chunk = Arrays.copyOfRange(pending.data, start, end);
             NetworkHandler.INSTANCE.sendTo(
                 new PacketEmoteDataDownload(pending.checksum, pending.nextChunkIndex, pending.totalChunks, chunk),
@@ -748,7 +748,7 @@ public class EmoteServerHandler {
                 CachedEmote cached = entry.getValue();
                 NetworkHandler.INSTANCE.sendTo(
                     new PacketEmoteBroadcast(
-                        entry.getKey(),
+                        cached.name,
                         cached.checksum,
                         cached.sender,
                         PacketEmoteBroadcast.TYPE_ONE_OFF,
