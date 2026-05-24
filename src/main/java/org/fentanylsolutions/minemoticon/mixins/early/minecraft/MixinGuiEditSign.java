@@ -9,6 +9,7 @@ import org.fentanylsolutions.minemoticon.gui.EmojiSuggestionHelper;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.text.EmojiPua;
 import org.lwjgl.input.Mouse;
+import org.lwjgl.opengl.GL11;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
@@ -27,6 +28,12 @@ public class MixinGuiEditSign extends GuiScreen {
 
     @Unique
     private static final int SIGN_TEXT_TOP_OFFSET = 34;
+
+    @Unique
+    private static final int SIGN_POPUP_SIDE_OFFSET = 70;
+
+    @Unique
+    private static final int SIGN_POPUP_TOP_OFFSET = 64;
 
     @Shadow
     private TileEntitySign tileSign;
@@ -70,12 +77,19 @@ public class MixinGuiEditSign extends GuiScreen {
         }
         minemoticon$wasMouseDown = mouseDown;
 
-        if (minemoticon$suggestions != null && minemoticon$hasEditableLine()) {
-            minemoticon$suggestions.update();
-            minemoticon$suggestions.render(mouseX, mouseY);
-        }
+        GL11.glPushAttrib(GL11.GL_ENABLE_BIT | GL11.GL_DEPTH_BUFFER_BIT);
+        try {
+            GL11.glDisable(GL11.GL_DEPTH_TEST);
+            GL11.glDepthMask(false);
+            if (minemoticon$suggestions != null && minemoticon$hasEditableLine()) {
+                minemoticon$suggestions.update();
+                minemoticon$suggestions.render(mouseX, mouseY);
+            }
 
-        minemoticon$picker.render(mouseX, mouseY);
+            minemoticon$picker.render(mouseX, mouseY);
+        } finally {
+            GL11.glPopAttrib();
+        }
     }
 
     @Unique
@@ -194,6 +208,20 @@ public class MixinGuiEditSign extends GuiScreen {
             @Override
             public boolean hasBackground() {
                 return false;
+            }
+
+            @Override
+            public int getPopupX(int preferredX, int popupWidth, int screenWidth) {
+                int rightX = width / 2 + SIGN_POPUP_SIDE_OFFSET;
+                if (rightX + popupWidth <= screenWidth - 2) {
+                    return rightX;
+                }
+                return width / 2 - SIGN_POPUP_SIDE_OFFSET - popupWidth;
+            }
+
+            @Override
+            public int getPopupY(int preferredY, int popupHeight, int screenHeight) {
+                return height / 2 - SIGN_POPUP_TOP_OFFSET;
             }
         };
     }

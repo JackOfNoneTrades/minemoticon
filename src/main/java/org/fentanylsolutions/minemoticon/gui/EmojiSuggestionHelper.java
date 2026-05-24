@@ -42,6 +42,10 @@ public class EmojiSuggestionHelper {
         int getScrollOffset();
 
         boolean hasBackground();
+
+        int getPopupX(int preferredX, int popupWidth, int screenWidth);
+
+        int getPopupY(int preferredY, int popupHeight, int screenHeight);
     }
 
     private static class GuiTextFieldInput implements TextInput {
@@ -101,6 +105,16 @@ public class EmojiSuggestionHelper {
         @Override
         public boolean hasBackground() {
             return inputField.getEnableBackgroundDrawing();
+        }
+
+        @Override
+        public int getPopupX(int preferredX, int popupWidth, int screenWidth) {
+            return preferredX;
+        }
+
+        @Override
+        public int getPopupY(int preferredY, int popupHeight, int screenHeight) {
+            return preferredY;
         }
     }
 
@@ -401,6 +415,7 @@ public class EmojiSuggestionHelper {
 
     private int getPopupX(int textIndex, int scrollOffset, String visibleText, int popupW) {
         int popupX = getRenderedTextX(textIndex, scrollOffset, visibleText);
+        popupX = input.getPopupX(popupX, popupW, screenWidth);
         if (screenWidth <= 0) {
             return popupX;
         }
@@ -418,6 +433,7 @@ public class EmojiSuggestionHelper {
         if (popupY + popupH > screenHeight - 2) {
             popupY = input.getY() - popupH - 2;
         }
+        popupY = input.getPopupY(popupY, popupH, screenHeight);
         return Math.max(2, Math.min(popupY, screenHeight - popupH - 2));
     }
 
