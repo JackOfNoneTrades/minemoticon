@@ -14,8 +14,22 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import cpw.mods.fml.common.Loader;
+
 @Mixin(GuiRepair.class)
 public abstract class MixinGuiRepair extends GuiContainer {
+
+    @Unique
+    private static final int PICKER_BUTTON_SIZE = 12;
+
+    @Unique
+    private static final int PICKER_MARGIN = 4;
+
+    @Unique
+    private static final int SCREEN_MARGIN = 2;
+
+    @Unique
+    private static final int NEI_FOOTER_HEIGHT = 20;
 
     @Shadow
     private GuiTextField field_147091_w;
@@ -35,8 +49,9 @@ public abstract class MixinGuiRepair extends GuiContainer {
 
     @Inject(method = "initGui", at = @At("TAIL"))
     private void minemoticon$initGui(CallbackInfo ci) {
-        int btnX = guiLeft + 62 + 103 + 13;
-        int btnY = guiTop + 24;
+        int[] buttonPos = minemoticon$getPickerButtonPosition();
+        int btnX = buttonPos[0];
+        int btnY = buttonPos[1];
         minemoticon$picker = new EmojiPickerGui(field_147091_w, fontRendererObj, width, height, btnX, btnY, false);
     }
 
@@ -89,5 +104,27 @@ public abstract class MixinGuiRepair extends GuiContainer {
     private boolean canInput() {
         return field_147092_v.getSlot(0)
             .getHasStack();
+    }
+
+    @Unique
+    private int[] minemoticon$getPickerButtonPosition() {
+        int x = guiLeft + xSize - PICKER_BUTTON_SIZE - PICKER_MARGIN;
+        int y = guiTop + ySize + PICKER_MARGIN;
+        return minemoticon$clampToScreen(x, y);
+    }
+
+    @Unique
+    private int[] minemoticon$clampToScreen(int x, int y) {
+        int maxY = height - PICKER_BUTTON_SIZE - SCREEN_MARGIN;
+        if (Loader.isModLoaded("NotEnoughItems")) {
+            maxY -= NEI_FOOTER_HEIGHT + PICKER_MARGIN;
+        }
+        return new int[] { minemoticon$clamp(x, SCREEN_MARGIN, width - PICKER_BUTTON_SIZE - SCREEN_MARGIN),
+            minemoticon$clamp(y, SCREEN_MARGIN, maxY) };
+    }
+
+    @Unique
+    private int minemoticon$clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }
