@@ -68,6 +68,19 @@ current_ref() {
     fi
 }
 
+expected_commit() {
+    git -C "$SUBMODULE_DIR" rev-parse -q --verify "refs/tags/$FREETYPE_TAG^{commit}" 2>/dev/null || true
+}
+
+ensure_expected_tag() {
+    if [[ -n "$(expected_commit)" ]]; then
+        return 0
+    fi
+
+    echo "FreeType tag $FREETYPE_TAG is not available locally; fetching tags." >&2
+    git -C "$SUBMODULE_DIR" fetch --force origin "refs/tags/$FREETYPE_TAG:refs/tags/$FREETYPE_TAG"
+}
+
 verify_checkout() {
     if [[ ! -f "$SUBMODULE_DIR/include/freetype/freetype.h" ]]; then
         echo "FreeType source is missing under $SUBMODULE_DIR." >&2
@@ -75,9 +88,16 @@ verify_checkout() {
         exit 1
     fi
 
-    local actual_tag
-    actual_tag="$(current_exact_tag)"
-    if [[ "$actual_tag" != "$FREETYPE_TAG" ]]; then
+    ensure_expected_tag
+
+    local expected actual
+    expected="$(expected_commit)"
+    actual="$(git -C "$SUBMODULE_DIR" rev-parse HEAD)"
+    if [[ -z "$expected" ]]; then
+        echo "FreeType tag $FREETYPE_TAG could not be resolved." >&2
+        exit 1
+    fi
+    if [[ "$actual" != "$expected" ]]; then
         echo "FreeType submodule is at $(current_ref), expected $FREETYPE_TAG." >&2
         echo "Run ./gradlew syncFreetypeSubmodule${FREETYPE_VERSION:+ -PfreetypeVersion=$FREETYPE_VERSION} and commit the updated submodule pointer." >&2
         exit 1

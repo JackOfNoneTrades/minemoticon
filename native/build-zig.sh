@@ -104,9 +104,21 @@ ensure_freetype_source() {
     fi
 
     if git -C "$FREETYPE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        local exact_tag
-        exact_tag="$(git -C "$FREETYPE_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
-        if [[ "$exact_tag" != "$FREETYPE_TAG" ]]; then
+        local expected actual exact_tag
+        expected="$(git -C "$FREETYPE_DIR" rev-parse -q --verify "refs/tags/$FREETYPE_TAG^{commit}" 2>/dev/null || true)"
+        if [[ -z "$expected" ]]; then
+            echo "FreeType tag $FREETYPE_TAG is not available locally; fetching tags." >&2
+            git -C "$FREETYPE_DIR" fetch --force origin "refs/tags/$FREETYPE_TAG:refs/tags/$FREETYPE_TAG"
+            expected="$(git -C "$FREETYPE_DIR" rev-parse -q --verify "refs/tags/$FREETYPE_TAG^{commit}" 2>/dev/null || true)"
+        fi
+        if [[ -z "$expected" ]]; then
+            echo "FreeType tag $FREETYPE_TAG could not be resolved." >&2
+            exit 1
+        fi
+
+        actual="$(git -C "$FREETYPE_DIR" rev-parse HEAD)"
+        if [[ "$actual" != "$expected" ]]; then
+            exact_tag="$(git -C "$FREETYPE_DIR" describe --tags --exact-match HEAD 2>/dev/null || true)"
             echo "FreeType checkout is at ${exact_tag:-$(git -C "$FREETYPE_DIR" rev-parse --short HEAD)}, expected $FREETYPE_TAG." >&2
             echo "Run ./gradlew syncFreetypeSubmodule${FREETYPE_VERSION:+ -PfreetypeVersion=$FREETYPE_VERSION} to repin it." >&2
             exit 1
