@@ -31,6 +31,7 @@ public class EmoteServerHandler {
     private static final int MAX_QUEUED_DOWNLOADS_PER_PLAYER = 256;
     private static final int MAX_CHUNKS_PER_TICK_PER_PLAYER = 2;
     private static final int TARGET_FREE_PUAS_PER_PLAYER = 16;
+    private static final long UPLOAD_TIMEOUT_MS = 30_000L;
 
     public static class CachedEmote {
 
@@ -65,18 +66,30 @@ public class EmoteServerHandler {
         final String checksum;
         final String senderName;
         final String pua;
-        final int totalChunks;
-        final byte[][] chunks;
+        final long createdAtMs;
+        int totalChunks = -1;
+        byte[][] chunks;
         int received;
 
-        PendingUpload(String name, String namespace, String checksum, String senderName, String pua, int totalChunks) {
+        PendingUpload(String name, String namespace, String checksum, String senderName, String pua) {
             this.name = name;
             this.namespace = namespace != null ? namespace : "";
             this.checksum = checksum;
             this.senderName = senderName;
             this.pua = pua != null ? pua : "";
+            this.createdAtMs = System.currentTimeMillis();
+        }
+
+        boolean initialize(int totalChunks) {
+            if (this.totalChunks >= 0) {
+                return this.totalChunks == totalChunks;
+            }
+            if (totalChunks <= 0 || totalChunks > EmoteTransferLimits.MAX_CHUNKS) {
+                return false;
+            }
             this.totalChunks = totalChunks;
             this.chunks = new byte[totalChunks][];
+            return true;
         }
     }
 
@@ -134,6 +147,11 @@ public class EmoteServerHandler {
             return;
         }
 
+        if (!EmoteTransferLimits.isValidChecksum(checksum)) {
+            NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(name, "Invalid emote checksum", pua), player);
+            return;
+        }
+
         String sender = player.getCommandSenderName();
         if (!consumeLeasedPua(sender, pua)) {
             NetworkHandler.INSTANCE
@@ -170,6 +188,7 @@ public class EmoteServerHandler {
             return;
         }
 
+        pendingUploads.put(uploadKey(sender, pua), new PendingUpload(name, namespace, checksum, sender, pua));
         NetworkHandler.INSTANCE.sendTo(new PacketEmoteUploadRequest(name, namespace, checksum, pua), player);
     }
 
@@ -200,16 +219,36 @@ public class EmoteServerHandler {
     public static void onEmoteDataUpload(EntityPlayerMP player, String name, String namespace, String checksum,
         String pua, int chunkIndex, int totalChunks, byte[] data) {
         if (!ServerConfig.allowClientEmotes) return;
-        if (!EmojiPua.isPuaToken(pua)) {
+        if (!EmojiPua.isPuaToken(pua) || !EmoteTransferLimits.isValidChecksum(checksum)) {
             return;
         }
 
-        String key = player.getCommandSenderName() + ":" + checksum;
-        PendingUpload pending = pendingUploads.computeIfAbsent(
-            key,
-            ignored -> new PendingUpload(name, namespace, checksum, player.getCommandSenderName(), pua, totalChunks));
+        String key = uploadKey(player.getCommandSenderName(), pua);
+        PendingUpload pending = pendingUploads.get(key);
+        if (pending == null) {
+            Minemoticon
+                .debug("Ignoring upload chunk without pending registration from {}", player.getCommandSenderName());
+            return;
+        }
 
-        if (chunkIndex < 0 || chunkIndex >= pending.totalChunks) return;
+        String normalizedNamespace = namespace != null ? namespace : "";
+        if (!pending.name.equals(name) || !pending.namespace.equals(normalizedNamespace)
+            || !pending.checksum.equals(checksum)) {
+            rejectPendingUpload(player, key, pending, "Upload metadata mismatch");
+            return;
+        }
+
+        if (!pending.initialize(totalChunks)) {
+            rejectPendingUpload(player, key, pending, "Invalid upload chunk count");
+            return;
+        }
+
+        if (!EmoteTransferLimits.isValidChunkShape(chunkIndex, pending.totalChunks) || data == null
+            || data.length <= 0
+            || data.length > EmoteTransferLimits.CHUNK_SIZE_BYTES) {
+            rejectPendingUpload(player, key, pending, "Invalid upload chunk");
+            return;
+        }
         if (pending.chunks[chunkIndex] != null) return;
 
         pending.chunks[chunkIndex] = data;
@@ -272,6 +311,7 @@ public class EmoteServerHandler {
     }
 
     public static void tick() {
+        expirePendingUploads();
         for (EntityPlayerMP player : getPlayers()) {
             pumpDownloadQueue(player);
         }
@@ -328,13 +368,13 @@ public class EmoteServerHandler {
 
     private static void processUpload(EntityPlayerMP player, PendingUpload pending) {
         int maxClientEmoteSize = ServerConfig.getEffectiveMaxClientEmoteSize();
-        int totalSize = 0;
+        long totalSize = 0L;
         for (byte[] chunk : pending.chunks) {
             if (chunk == null) return;
             totalSize += chunk.length;
         }
 
-        if (totalSize > maxClientEmoteSize) {
+        if (totalSize <= 0L || totalSize > maxClientEmoteSize || totalSize > Integer.MAX_VALUE) {
             restoreConsumedPua(pending.senderName, pending.pua);
             NetworkHandler.INSTANCE.sendTo(
                 new PacketEmoteReject(
@@ -345,7 +385,7 @@ public class EmoteServerHandler {
             return;
         }
 
-        byte[] raw = new byte[totalSize];
+        byte[] raw = new byte[(int) totalSize];
         int offset = 0;
         for (byte[] chunk : pending.chunks) {
             System.arraycopy(chunk, 0, raw, offset, chunk.length);
@@ -845,11 +885,11 @@ public class EmoteServerHandler {
     }
 
     private static boolean consumeLeasedPua(String owner, String pua) {
-        ArrayDeque<String> available = availablePuasByOwner.get(owner);
-        if (available == null || !available.remove(pua)) {
+        if (!owner.equals(leasedPuaOwners.get(pua))) {
             return false;
         }
-        return leasedPuaOwners.containsKey(pua) && owner.equals(leasedPuaOwners.get(pua));
+        ArrayDeque<String> available = availablePuasByOwner.get(owner);
+        return available != null && available.remove(pua);
     }
 
     private static void restoreConsumedPua(String owner, String pua) {
@@ -878,6 +918,30 @@ public class EmoteServerHandler {
             }
         }
         leasedPuaOwners.remove(pua);
+    }
+
+    private static void rejectPendingUpload(EntityPlayerMP player, String key, PendingUpload pending, String reason) {
+        pendingUploads.remove(key);
+        restoreConsumedPua(pending.senderName, pending.pua);
+        NetworkHandler.INSTANCE.sendTo(new PacketEmoteReject(pending.name, reason, pending.pua), player);
+    }
+
+    private static void expirePendingUploads() {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, PendingUpload> entry : new ArrayList<>(pendingUploads.entrySet())) {
+            PendingUpload pending = entry.getValue();
+            if (now - pending.createdAtMs <= UPLOAD_TIMEOUT_MS) {
+                continue;
+            }
+            if (pendingUploads.remove(entry.getKey(), pending)) {
+                restoreConsumedPua(pending.senderName, pending.pua);
+                Minemoticon.debug("Expired pending emote upload from {}", pending.senderName);
+            }
+        }
+    }
+
+    private static String uploadKey(String owner, String pua) {
+        return owner + ":" + pua;
     }
 
 }
