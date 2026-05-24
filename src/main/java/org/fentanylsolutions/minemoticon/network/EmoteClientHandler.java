@@ -41,7 +41,6 @@ public class EmoteClientHandler {
         }
     }
 
-    private static final int CHUNK_SIZE = 30000;
     private static final File CACHE_DIR = new File("config/minemoticon/emote_cache");
     private static final int MAX_ACTIVE_DOWNLOADS = 2;
     private static final long DOWNLOAD_TIMEOUT_MS = 15000L;
@@ -219,10 +218,11 @@ public class EmoteClientHandler {
         }
 
         byte[] data = transfer.data;
-        int totalChunks = (data.length + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        int totalChunks = (data.length + EmoteTransferLimits.CHUNK_SIZE_BYTES - 1)
+            / EmoteTransferLimits.CHUNK_SIZE_BYTES;
         for (int i = 0; i < totalChunks; i++) {
-            int start = i * CHUNK_SIZE;
-            int end = Math.min(start + CHUNK_SIZE, data.length);
+            int start = i * EmoteTransferLimits.CHUNK_SIZE_BYTES;
+            int end = Math.min(start + EmoteTransferLimits.CHUNK_SIZE_BYTES, data.length);
             byte[] chunk = java.util.Arrays.copyOfRange(data, start, end);
             NetworkHandler.INSTANCE.sendToServer(
                 new PacketEmoteDataUpload(name, pack.getPackFolder(), transfer.checksum, pua, i, totalChunks, chunk));
@@ -239,6 +239,10 @@ public class EmoteClientHandler {
 
     public static void onEmoteBroadcast(String name, String checksum, String senderName, byte type, String category,
         String namespace, String pua, boolean isIcon) {
+        if (!EmoteTransferLimits.isValidChecksum(checksum)) {
+            Minemoticon.debug("Ignoring emote broadcast with invalid checksum: {}", checksum);
+            return;
+        }
         if (type == PacketEmoteBroadcast.TYPE_CLIENT_EMOTE && !EmojiConfig.receiveClientEmotes) {
             return;
         }
@@ -409,8 +413,21 @@ public class EmoteClientHandler {
     }
 
     public static void onEmoteDataDownload(String checksum, int chunkIndex, int totalChunks, byte[] data) {
-        PendingDownload pending = pendingDownloads
-            .computeIfAbsent(checksum, ignored -> new PendingDownload(checksum, totalChunks));
+        if (!EmoteTransferLimits.isValidChecksum(checksum)
+            || !EmoteTransferLimits.isValidChunkShape(chunkIndex, totalChunks)
+            || data == null
+            || data.length > EmoteTransferLimits.CHUNK_SIZE_BYTES) {
+            return;
+        }
+
+        PendingDownload pending = pendingDownloads.get(checksum);
+        if (pending == null) {
+            pending = new PendingDownload(checksum, totalChunks);
+            pendingDownloads.put(checksum, pending);
+        } else if (pending.totalChunks != totalChunks) {
+            return;
+        }
+
         if (chunkIndex < 0 || chunkIndex >= pending.totalChunks || pending.chunks[chunkIndex] != null) {
             return;
         }
@@ -541,15 +558,19 @@ public class EmoteClientHandler {
     }
 
     private static void processDownload(PendingDownload pending) {
-        int totalSize = 0;
+        long totalSize = 0L;
         for (byte[] chunk : pending.chunks) {
             if (chunk == null) {
                 return;
             }
             totalSize += chunk.length;
         }
+        if (totalSize <= 0L || totalSize > Integer.MAX_VALUE) {
+            finishDownload(pending.checksum);
+            return;
+        }
 
-        byte[] raw = new byte[totalSize];
+        byte[] raw = new byte[(int) totalSize];
         int offset = 0;
         for (byte[] chunk : pending.chunks) {
             System.arraycopy(chunk, 0, raw, offset, chunk.length);
@@ -557,13 +578,19 @@ public class EmoteClientHandler {
         }
 
         String checksum = EmoteServerHandler.sha1(raw);
+        if (!pending.checksum.equalsIgnoreCase(checksum)) {
+            finishDownload(pending.checksum);
+            Minemoticon.LOG
+                .warn("Dropped emote download with checksum mismatch: expected {}, got {}", pending.checksum, checksum);
+            return;
+        }
+
         CACHE_DIR.mkdirs();
         try {
             String extension = EmojiImageLoader.fileExtensionForPayload(raw);
             File cacheFile = new File(CACHE_DIR, checksum + extension);
             Files.write(cacheFile.toPath(), raw);
-            activeDownloads.remove(pending.checksum);
-            requestedDownloads.remove(pending.checksum);
+            finishDownload(pending.checksum);
             List<PendingAlias> aliases = pendingAliases.remove(pending.checksum);
             if (aliases != null) {
                 for (PendingAlias alias : aliases) {
@@ -580,8 +607,7 @@ public class EmoteClientHandler {
                 }
             }
         } catch (IOException e) {
-            activeDownloads.remove(pending.checksum);
-            requestedDownloads.remove(pending.checksum);
+            finishDownload(pending.checksum);
             Minemoticon.LOG.error("Failed to cache remote emote: {}", pending.checksum, e);
         } finally {
             pumpQueuedDownloads();
@@ -589,11 +615,14 @@ public class EmoteClientHandler {
     }
 
     public static File findCachedEmoteFile(String checksum) {
+        if (!EmoteTransferLimits.isValidChecksum(checksum)) {
+            return null;
+        }
         return EmojiImageLoader.findCachedFile(CACHE_DIR, checksum);
     }
 
     public static void queueDownloadRequest(String checksum) {
-        if (checksum == null || checksum.isEmpty() || !requestedDownloads.add(checksum)) {
+        if (!EmoteTransferLimits.isValidChecksum(checksum) || !requestedDownloads.add(checksum)) {
             return;
         }
 
@@ -619,6 +648,11 @@ public class EmoteClientHandler {
             activeDownloads.put(checksum, System.currentTimeMillis());
             NetworkHandler.INSTANCE.sendToServer(new PacketEmoteDownloadRequest(checksum));
         }
+    }
+
+    private static void finishDownload(String checksum) {
+        activeDownloads.remove(checksum);
+        requestedDownloads.remove(checksum);
     }
 
     private static void registerRemoteEmoji(String name, String checksum, File cacheFile, String category,
