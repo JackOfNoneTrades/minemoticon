@@ -68,7 +68,14 @@ public class DownloadedTexture extends AbstractTexture {
     public void loadTexture(IResourceManager resourceManager) throws IOException {
         if (cacheFile != null && cacheFile.isFile()) {
             try {
-                pendingImage.set(ImageIO.read(cacheFile));
+                BufferedImage cached = ImageIO.read(cacheFile);
+                if (cached != null) {
+                    pendingImage.set(cached);
+                } else {
+                    Minemoticon.LOG
+                        .warn("Cached emoji {} is not a readable image, re-downloading", cacheFile.getName());
+                    submitDownload();
+                }
             } catch (IOException e) {
                 Minemoticon.LOG.warn("Failed to read cached emoji {}, re-downloading", cacheFile.getName());
                 submitDownload();
@@ -102,12 +109,19 @@ public class DownloadedTexture extends AbstractTexture {
                 Minecraft.getMinecraft()
                     .getProxy());
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Minemoticon)");
+            conn.setConnectTimeout(5000);
+            conn.setReadTimeout(10000);
             conn.setDoInput(true);
             conn.setDoOutput(false);
             conn.connect();
             if (conn.getResponseCode() / 100 == 2) {
                 FileUtils.copyInputStreamToFile(conn.getInputStream(), cacheFile);
-                pendingImage.set(ImageIO.read(cacheFile));
+                BufferedImage downloaded = ImageIO.read(cacheFile);
+                if (downloaded != null) {
+                    pendingImage.set(downloaded);
+                } else {
+                    Minemoticon.LOG.warn("Downloaded emoji from {} was not a readable image", imageUrl);
+                }
             } else {
                 Minemoticon.LOG.warn("Failed to download emoji from {}: HTTP {}", imageUrl, conn.getResponseCode());
             }
