@@ -536,7 +536,7 @@ public class ClientEmojiHandler {
                 }
 
                 for (String key : emoji.strings) {
-                    EMOJI_LOOKUP.put(key, emoji);
+                    EMOJI_LOOKUP.putIfAbsent(key, emoji);
                     registerShortName(key, emoji);
                 }
 
