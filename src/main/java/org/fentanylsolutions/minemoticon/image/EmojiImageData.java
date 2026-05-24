@@ -56,8 +56,12 @@ public final class EmojiImageData {
         if (frameDurationsMs == null || frameDurationsMs.length != frameCount) {
             throw new IllegalArgumentException("frameDurationsMs must match frameCount");
         }
-        int rowCount = (frameCount + framesPerRow - 1) / framesPerRow;
-        if (atlasImage.getWidth() < framesPerRow * frameWidth || atlasImage.getHeight() < rowCount * frameHeight) {
+        long rowCount = (frameCount + (long) framesPerRow - 1L) / framesPerRow;
+        long expectedWidth = (long) framesPerRow * frameWidth;
+        long expectedHeight = rowCount * frameHeight;
+        if (expectedWidth > Integer.MAX_VALUE || expectedHeight > Integer.MAX_VALUE
+            || atlasImage.getWidth() < expectedWidth
+            || atlasImage.getHeight() < expectedHeight) {
             throw new IllegalArgumentException("atlasImage is too small for the declared frame layout");
         }
 

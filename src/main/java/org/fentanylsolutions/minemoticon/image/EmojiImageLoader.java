@@ -115,7 +115,7 @@ public final class EmojiImageLoader {
     }
 
     public static File findCachedFile(File directory, String checksum) {
-        if (directory == null || !directory.isDirectory()) {
+        if (directory == null || !directory.isDirectory() || !isSafeChecksum(checksum)) {
             return null;
         }
 
@@ -223,6 +223,12 @@ public final class EmojiImageLoader {
                 "Emoji dimensions " + imageData
                     .getFrameWidth() + "x" + imageData.getFrameHeight() + " exceed safe max " + MAX_ATLAS_SIDE);
         }
+        if (enforceMaxDimension
+            && (imageData.getFrameWidth() > maxDimension || imageData.getFrameHeight() > maxDimension)) {
+            throw new IOException(
+                "Emoji dimensions " + imageData
+                    .getFrameWidth() + "x" + imageData.getFrameHeight() + " exceed max " + maxDimension);
+        }
     }
 
     private static void validateAtlasSize(EmojiImageData imageData) throws IOException {
@@ -278,6 +284,19 @@ public final class EmojiImageLoader {
         }
         for (int i = 0; i < magic.length(); i++) {
             if (rawBytes[i] != (byte) magic.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isSafeChecksum(String checksum) {
+        if (checksum == null || checksum.length() != 40) {
+            return false;
+        }
+        for (int i = 0; i < checksum.length(); i++) {
+            char c = checksum.charAt(i);
+            if (!(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F')) {
                 return false;
             }
         }

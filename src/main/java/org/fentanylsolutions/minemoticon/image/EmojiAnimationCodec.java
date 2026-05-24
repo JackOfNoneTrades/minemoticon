@@ -14,6 +14,7 @@ public final class EmojiAnimationCodec {
     public static final String FILE_EXTENSION = ".mnea";
 
     private static final byte[] MAGIC = new byte[] { 'M', 'N', 'E', 'A', '1' };
+    private static final int MAX_FRAME_COUNT = 4096;
 
     private EmojiAnimationCodec() {}
 
@@ -69,16 +70,26 @@ public final class EmojiAnimationCodec {
         int frameHeight = input.readInt();
         int frameCount = input.readInt();
         int framesPerRow = input.readInt();
+        if (frameWidth <= 0 || frameHeight <= 0
+            || frameCount <= 0
+            || frameCount > MAX_FRAME_COUNT
+            || framesPerRow <= 0
+            || framesPerRow > frameCount) {
+            throw new IOException("Animated emoji metadata is invalid");
+        }
 
         int delayCount = input.readInt();
+        if (delayCount != frameCount) {
+            throw new IOException("Animated emoji delay count does not match frame count");
+        }
         int[] delaysMs = new int[delayCount];
         for (int i = 0; i < delayCount; i++) {
             delaysMs[i] = input.readInt();
         }
 
         int atlasLength = input.readInt();
-        if (atlasLength <= 0) {
-            throw new IOException("Animated emoji atlas is empty");
+        if (atlasLength <= 0 || atlasLength > input.available()) {
+            throw new IOException("Animated emoji atlas length is invalid");
         }
 
         byte[] atlasBytes = new byte[atlasLength];
