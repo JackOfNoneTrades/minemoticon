@@ -1,5 +1,7 @@
 package org.fentanylsolutions.minemoticon.mixins.early.minecraft;
 
+import java.lang.reflect.Method;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.GuiMainMenu;
@@ -29,6 +31,18 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
     @Unique
     private static final float minemoticon$INLINE_EMOJI_Y_OFFSET = -(EmojiRenderer.EMOJI_SIZE - 8.0f) / 2.0f;
+
+    @Unique
+    private static boolean minemoticon$swanSongTextBridgeChecked = false;
+
+    @Unique
+    private static Method minemoticon$swanSongBeginTessellating = null;
+
+    @Unique
+    private static Method minemoticon$swanSongDraw = null;
+
+    @Unique
+    private static Method minemoticon$swanSongSetColor = null;
 
     @Shadow
     private float posX;
@@ -767,10 +781,16 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
     @Unique
     private void minemoticon$flushVanillaText(StringBuilder vanillaBuf, boolean shadow) {
+        boolean swanSongBatchStarted = minemoticon$beginSwanSongTextBatch();
         minemoticon$bindVanillaFontTexture();
         minemoticon$applyRenderColor(this.minemoticon$currentRenderColor);
-        this.renderStringAtPos(vanillaBuf.toString(), shadow);
-        vanillaBuf.setLength(0);
+        minemoticon$applySwanSongTextColor(this.minemoticon$currentRenderColor);
+        try {
+            this.renderStringAtPos(vanillaBuf.toString(), shadow);
+        } finally {
+            minemoticon$endSwanSongTextBatch(swanSongBatchStarted);
+            vanillaBuf.setLength(0);
+        }
     }
 
     @Unique
@@ -788,6 +808,95 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         float g = (float) (argb >> 8 & 255) / 255.0f;
         float b = (float) (argb & 255) / 255.0f;
         GL11.glColor4f(r, g, b, this.alpha);
+    }
+
+    @Unique
+    private boolean minemoticon$beginSwanSongTextBatch() {
+        if (!minemoticon$resolveSwanSongTextBridge(this.getClass())) {
+            return false;
+        }
+
+        try {
+            return (Boolean) minemoticon$swanSongBeginTessellating.invoke(this);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    @Unique
+    private void minemoticon$endSwanSongTextBatch(boolean thisStart) {
+        if (!thisStart || minemoticon$swanSongDraw == null) {
+            return;
+        }
+
+        try {
+            minemoticon$swanSongDraw.invoke(this, true);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // SwanSong is optional. Falling back to vanilla behavior is better than breaking text rendering.
+        }
+    }
+
+    @Unique
+    private void minemoticon$applySwanSongTextColor(int argb) {
+        if (minemoticon$swanSongSetColor == null) {
+            return;
+        }
+
+        float r = (float) (argb >> 16 & 255) / 255.0f;
+        float g = (float) (argb >> 8 & 255) / 255.0f;
+        float b = (float) (argb & 255) / 255.0f;
+
+        try {
+            minemoticon$swanSongSetColor.invoke(this, r, g, b, this.alpha);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // SwanSong is optional. GL state was already updated by minemoticon$applyRenderColor.
+        }
+    }
+
+    @Unique
+    private static boolean minemoticon$resolveSwanSongTextBridge(Class<?> rendererClass) {
+        if (minemoticon$swanSongTextBridgeChecked) {
+            return minemoticon$swanSongBeginTessellating != null && minemoticon$swanSongDraw != null
+                && minemoticon$swanSongSetColor != null;
+        }
+
+        minemoticon$swanSongTextBridgeChecked = true;
+        try {
+            minemoticon$swanSongBeginTessellating = minemoticon$getRendererMethod(
+                rendererClass,
+                "swan$beginTessellating");
+            minemoticon$swanSongDraw = minemoticon$getRendererMethod(rendererClass, "swan$draw", Boolean.TYPE);
+            minemoticon$swanSongSetColor = minemoticon$getRendererMethod(
+                rendererClass,
+                "setColor",
+                Float.TYPE,
+                Float.TYPE,
+                Float.TYPE,
+                Float.TYPE);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            minemoticon$swanSongBeginTessellating = null;
+            minemoticon$swanSongDraw = null;
+            minemoticon$swanSongSetColor = null;
+        }
+
+        return minemoticon$swanSongBeginTessellating != null && minemoticon$swanSongDraw != null
+            && minemoticon$swanSongSetColor != null;
+    }
+
+    @Unique
+    private static Method minemoticon$getRendererMethod(Class<?> rendererClass, String name, Class<?>... parameterTypes)
+        throws NoSuchMethodException {
+        Class<?> current = rendererClass;
+        while (current != null) {
+            try {
+                Method method = current.getDeclaredMethod(name, parameterTypes);
+                method.setAccessible(true);
+                return method;
+            } catch (NoSuchMethodException ignored) {
+                current = current.getSuperclass();
+            }
+        }
+        throw new NoSuchMethodException(name);
     }
 
     @Unique
