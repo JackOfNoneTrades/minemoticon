@@ -6,6 +6,7 @@ Emoji and font support for `1.7.10 Minecraft`. Custom packs, server packs, anima
 This mod bundles the [FreeType](https://freetype.org/) library for font rendering. The default emoji font uses [Twemoji](https://github.com/twitter/twemoji).
 
 [![hub](images/badges/github.png)](https://github.com/JackOfNoneTrades/minemoticon/releases)
+[![67](images/badges/67.png)](https://67.fentanylsolutions.org/mod/minemoticon)
 [![maven](images/badges/maven.png)](https://maven.fentanylsolutions.org/#/releases/org/fentanylsolutions/minemoticon)
 ![forge](images/badges/forge.png)
 [![cord](images/badges/cord.png)](https://discord.gg/xAWCqGrguG)
@@ -14,7 +15,6 @@ This mod bundles the [FreeType](https://freetype.org/) library for font renderin
 [![modrinth](images/badges/modrinth.png)](https://modrinth.com/mod/minemoticon)
 [![curse](images/badges/curse.png)](https://www.curseforge.com/minecraft/mc-mods/minemoticon)
 [![mcmodcn](images/badges/mcmodcn.png)](https://www.mcmod.cn/class/TODO.html)
-[![67](images/badges/67.png)](https://67.fentanylsolutions.org/mod/tabfaces)
 -->
 
 ![picker](images/screenshots/main.png)
