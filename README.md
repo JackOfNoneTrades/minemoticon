@@ -3,7 +3,7 @@
 ![logo](images/logo_small.png)
 
 Emoji and font support for `1.7.10 Minecraft`. Custom packs, server packs, animated custom emojis, picker, autocomplete, multiplayer sharing, and emoji fonts.
-This mod bundles the [FreeType](https://freetype.org/) library for font rendering.
+This mod bundles the [FreeType](https://freetype.org/) library for font rendering. The default emoji font uses [Twemoji](https://github.com/twitter/twemoji).
 
 [![hub](images/badges/github.png)](https://github.com/JackOfNoneTrades/minemoticon/releases)
 [![maven](images/badges/maven.png)](https://maven.fentanylsolutions.org/#/releases/org/fentanylsolutions/minemoticon)
@@ -14,45 +14,17 @@ This mod bundles the [FreeType](https://freetype.org/) library for font renderin
 [![modrinth](images/badges/modrinth.png)](https://modrinth.com/mod/minemoticon)
 [![curse](images/badges/curse.png)](https://www.curseforge.com/minecraft/mc-mods/minemoticon)
 [![mcmodcn](images/badges/mcmodcn.png)](https://www.mcmod.cn/class/TODO.html)
+[![67](images/badges/67.png)](https://67.fentanylsolutions.org/mod/tabfaces)
 -->
 
 ![picker](images/screenshots/main.png)
 
 ### Features
 
-* **Stock emojis** from [Twemoji](https://github.com/twitter/twemoji).
-* **Custom emoji packs** from local folders. Drop PNGs, JPGs, GIFs, QOI, or WebP files into `config/minemoticon/packs/<packname>/`. Supports `pack.meta` for display names and icons.
-* **Server emoji packs** synced to clients on join. Add pack folders in `config/minemoticon/server_packs/`. Animated GIF and WebP emojis are supported. Use `/reload_emojis` to reload packs on a live server.
-* **Multiplayer emote sharing**. If enabled, the server can store user custom emojis persistently and serve them to other clients, including animated custom emojis. Clients can refuse third party emojis.
-* **Emoji picker** in chat with categories/packs and search.
-* **Autocomplete suggestions** when typing `:emo...`.
-* **Unicode emoji input**. Paste `☃️` and it renders as Twemoji. Also supports `:colon:` syntax.
-* **Namespaced pack emojis** (`:pack_folder_name/emoji:`) to avoid collisions with stock emojis.
-* **Custom emoji font support (experimental)**. Drop TTF files into `config/minemoticon/fonts/`. Supports CBDT bitmaps, SVG-in-OT, COLRv0, FreeType-backed COLRv1, and monochrome outlines.
-* **Management GUIs** for client packs, emoji fonts, and your server-stored custom emoji cache.
-* **Emojis should works everywhere**: chat, signs, config GUIs, books.
-
-### Config
-
-All config files live under `config/minemoticon/`:
-
-| File/Folder | Purpose                                                                   |
-|---|---------------------------------------------------------------------------|
-| `minemoticon.cfg` | Client settings (twemoji toggle, picker behavior, font, debug)            |
-| `server.cfg` | Server settings (client emotes, max size, persistent emoji quotas). Synced to clients via GTNHLib. |
-| `packs/` | Client emoji packs (subfolders with images + optional `pack.meta`)        |
-| `server_packs/` | Server emoji packs (same format, synced to clients on join)               |
-| `fonts/` | User TTF emoji fonts                                                      |
-| `cache/` | Atlas spritesheets (managed by the mod)                                   |
-| `emote_cache/` | Remote emote images/animations cached on disk                             |
-
-**pack.meta** example:
-```json
-{
-  "name": "My Emoji Pack",
-  "icon": "trollface"
-}
-```
+* Unicode and custom emoji support. Should work in all GUIs and on all in-game surfaces.
+* Support for custom emoji sync on servers which also have the mod installed.
+* Emoji picker and autocomplete.
+* Custom font support. Load any ttf or otf file. Fallback support.
 
 ### Commands
 
@@ -63,11 +35,11 @@ All config files live under `config/minemoticon/`:
 
 ## Dependencies
 
-* [UniMixins](https://modrinth.com/mod/unimixins) [![curse](images/icons/curse.png)](https://www.curseforge.com/minecraft/mc-mods/unimixins) [![modrinth](images/icons/modrinth.png)](https://modrinth.com/mod/unimixins) [![git](images/icons/git.png)](https://github.com/LegacyModdingMC/UniMixins/releases)
-* [GTNHLib](https://github.com/GTNewHorizons/GTNHLib)
-* [FentLib](https://maven.fentanylsolutions.org/#/releases/org/fentanylsolutions/fentlib)
+* [UniMixins](https://modrinth.com/mod/unimixins) [![curse](images/icons/curse.png)](https://www.curseforge.com/minecraft/mc-mods/unimixins)  [![modrinth](images/icons/modrinth.png)](https://modrinth.com/mod/unimixins/versions) [![git](images/icons/git.png)](https://github.com/LegacyModdingMC/UniMixins/releases)
+* [GTNHLib](https://modrinth.com/mod/gtnhlib)   [![curse](images/icons/curse.png)](https://www.curseforge.com/minecraft/mc-mods/gtnhlib)  [![modrinth](images/icons/modrinth.png)](https://modrinth.com/mod/gtnhlib) [![git](images/icons/git.png)](https://github.com/GTNewHorizons/GTNHLib/releases)
+* [FentLib](https://www.curseforge.com/minecraft/mc-mods/fentlib) [![curse](images/icons/curse.png)](https://www.curseforge.com/minecraft/mc-mods/fentlib) [![modrinth](images/icons/modrinth.png)](https://modrinth.com/mod/fentlib) [![67](images/icons/67.png)](https://67.fentanylsolutions.org/mod/fentlib) [![git](images/icons/git.png)](https://github.com/JackOfNoneTrades/FentLib)
 
-## Building & Developer info
+## Building
 
 `./gradlew build`
 
