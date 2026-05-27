@@ -3,7 +3,7 @@
 	"modList": [{
 		"modid": "${modId}",
 		"name": "${modName}",
-		"description": "Emoji support for Minecraft 1.7.10.",
+		"description": "Emoji and custom font support for Minecraft 1.7.10, using the FreeType library.",
 		"version": "${modVersion}",
 		"mcversion": "${minecraftVersion}",
 		"url": "https://github.com/JackOfNoneTrades/minemoticon",

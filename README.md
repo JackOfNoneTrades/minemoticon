@@ -1,8 +1,9 @@
 # Minemoticon
 
-![logo](images/logo.png)
+![logo](images/logo_small.png)
 
-Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, animated custom emojis, picker, autocomplete, multiplayer sharing, and emoji fonts.
+Emoji and font support for `1.7.10 Minecraft`. Custom packs, server packs, animated custom emojis, picker, autocomplete, multiplayer sharing, and emoji fonts.
+This mod bundles the [FreeType](https://freetype.org/) library for font rendering.
 
 [![hub](images/badges/github.png)](https://github.com/JackOfNoneTrades/minemoticon/releases)
 [![maven](images/badges/maven.png)](https://maven.fentanylsolutions.org/#/releases/org/fentanylsolutions/minemoticon)
@@ -33,7 +34,7 @@ Emoji support for `1.7.10 Minecraft`. Custom packs, server packs, animated custo
 
 ### Config
 
-All config lives under `config/minemoticon/`:
+All config files live under `config/minemoticon/`:
 
 | File/Folder | Purpose                                                                   |
 |---|---------------------------------------------------------------------------|
@@ -70,7 +71,7 @@ All config lives under `config/minemoticon/`:
 
 `./gradlew build`
 
-Native FreeType support is built automatically as part of `build`.
+Native FreeType support is built automatically as part of `build`, leveraging the zig compiler.
 
 If you cloned without submodules, initialize FreeType first:
 ```sh
@@ -90,8 +91,9 @@ To update the bundled emoji data and font:
 
 ## Credits
 
-* [Twemoji](https://github.com/twitter/twemoji) for emoji assets.
+* [Twemoji](https://github.com/twitter/twemoji) for default emoji assets.
 * [iamcal/emoji-data](https://github.com/iamcal/emoji-data) for emoji metadata.
+* [FreeType](https://freetype.org/).
 * [GT:NH buildscript](https://github.com/GTNewHorizons/ExampleMod1.7.10).
 
 ## License

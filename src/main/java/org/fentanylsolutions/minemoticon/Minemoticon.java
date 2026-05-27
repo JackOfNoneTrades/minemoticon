@@ -24,7 +24,7 @@ import cpw.mods.fml.common.event.FMLServerStartingEvent;
 
     customProperties = { @Mod.CustomProperty(k = "license", v = ":minemoticon/license: LGPLv3"),
         @Mod.CustomProperty(k = "issueTrackerUrl", v = "https://github.com/JackOfNoneTrades/minemoticon/issues"),
-        @Mod.CustomProperty(k = "iconFile", v = "assets/minemoticon/icon.png"),
+        @Mod.CustomProperty(k = "iconFile", v = "assets/minemoticon/logo.png"),
         @Mod.CustomProperty(k = "backgroundFile", v = "assets/minemoticon/background.png") })
 public class Minemoticon {
 
