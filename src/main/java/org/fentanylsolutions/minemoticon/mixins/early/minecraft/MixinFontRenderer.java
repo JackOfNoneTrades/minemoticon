@@ -389,6 +389,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
         int color = minemoticon$colorForStyle(style, style.rainbowStart, style.gradientStart, shadow);
         float yOffset = style.wave ? minemoticon$waveOffset(style.visibleStart) : 0.0f;
+        boolean syntheticBold = minemoticon$usesSyntheticBold(source, style.bold);
         if (!shadow || source.usesTextColor()) {
             float x0 = this.posX + xOffset;
             float y0 = this.posY + yOffset + (8.0f - displayHeight) * 0.5f + verticalOffset;
@@ -424,7 +425,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             }
         }
 
-        if (source.usesTextColor() && style.bold) {
+        if (source.usesTextColor() && syntheticBold) {
             float x0 = Math.round(this.posX + xOffset) + 1.0f;
             float y0 = Math.round(this.posY + yOffset + (8.0f - displayHeight) * 0.5f + verticalOffset);
             float x1 = x0 + drawWidth;
@@ -442,7 +443,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
         if (advance <= 0.0f) {
             advance = drawWidth > 0.0f ? drawWidth : 8.0f;
         }
-        if (style.bold && advance > 0.0f) {
+        if (syntheticBold && advance > 0.0f) {
             advance += 1.0f;
         }
         minemoticon$drawDecorationLines(advance, yOffset, style);
@@ -547,7 +548,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
                 tessellator.addVertexWithUV(x1, y1, 0.0, uv[2], uv[3]);
                 tessellator.addVertexWithUV(x1, y0, 0.0, uv[2], uv[1]);
 
-                if (source.usesTextColor() && style.bold) {
+                if (source.usesTextColor() && minemoticon$usesSyntheticBold(source, style.bold)) {
                     float boldX0 = x0 + 1.0f;
                     float boldX1 = boldX0 + drawWidth;
                     tessellator.addVertexWithUV(boldX0, y0, 0.0, uv[0], uv[1]);
@@ -571,7 +572,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             tessellator.draw();
         }
 
-        if (style.bold && runAdvance > 0.0f) {
+        if (minemoticon$usesSyntheticBold(source, style.bold) && runAdvance > 0.0f) {
             runAdvance += glyphCount;
         }
         minemoticon$applyRenderColor(minemoticon$colorForStyle(style, style.rainbowStart, style.gradientStart, shadow));
@@ -665,7 +666,7 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
                     float glyphW = cache.getGlyphDrawWidth(cp) * source.getWidthScale();
                     advance = glyphW > 0.0f ? glyphW : 8.0f;
                 }
-                if (bold && advance > 0.0f) {
+                if (minemoticon$usesSyntheticBold(source, bold) && advance > 0.0f) {
                     advance += 1.0f;
                 }
                 width += advance;
@@ -710,10 +711,15 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             }
         }
 
-        if (bold && width > 0.0f) {
+        if (minemoticon$usesSyntheticBold(source, bold) && width > 0.0f) {
             width += text.codePointCount(0, text.length());
         }
         return width;
+    }
+
+    @Unique
+    private boolean minemoticon$usesSyntheticBold(FontSource source, boolean bold) {
+        return bold && !minemoticon$isTextRunSource(source);
     }
 
     @Unique
