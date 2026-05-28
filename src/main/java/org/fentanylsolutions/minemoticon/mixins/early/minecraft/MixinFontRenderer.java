@@ -374,7 +374,8 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
     @Unique
     private void minemoticon$renderFontStackGlyph(FontSource source, int codepoint, boolean shadow,
         MinemoticonRunStyle style) {
-        GlyphCache cache = GlyphCache.forSource(source);
+        boolean textBold = minemoticon$usesTextBold(source, style.bold);
+        GlyphCache cache = GlyphCache.forSource(source, textBold);
         float[] uv = cache.getGlyphUV(codepoint);
         float drawWidth = cache.getGlyphDrawWidth(codepoint) * source.getWidthScale();
         float advance = cache.getGlyphAdvance(codepoint) * source.getWidthScale();
@@ -468,8 +469,9 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
 
         String run = customRunBuf.toString();
         customRunBuf.setLength(0);
-        GlyphCache cache = GlyphCache.forSource(source);
-        TextRunLayout layout = source.layoutTextRun(run, cache.getRenderSize());
+        boolean textBold = minemoticon$usesTextBold(source, style.bold);
+        GlyphCache cache = GlyphCache.forSource(source, textBold);
+        TextRunLayout layout = source.layoutTextRun(run, cache.getRenderSize(), textBold);
         int glyphCount = run.codePointCount(0, run.length());
         if (layout == null || layout.getGlyphCount() != glyphCount) {
             int visibleIndex = style.visibleStart;
@@ -690,8 +692,9 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
             return 0.0f;
         }
 
-        GlyphCache cache = GlyphCache.forSource(source);
-        TextRunLayout layout = source.layoutTextRun(text, cache.getRenderSize());
+        boolean textBold = minemoticon$usesTextBold(source, bold);
+        GlyphCache cache = GlyphCache.forSource(source, textBold);
+        TextRunLayout layout = source.layoutTextRun(text, cache.getRenderSize(), textBold);
         float width;
         if (layout != null && layout.getGlyphCount() == text.codePointCount(0, text.length())) {
             width = layout.getTotalAdvance() * source.getDisplayHeight()
@@ -720,6 +723,11 @@ public abstract class MixinFontRenderer implements FontRendererEmojiCompat {
     @Unique
     private boolean minemoticon$usesSyntheticBold(FontSource source, boolean bold) {
         return bold && !minemoticon$isTextRunSource(source);
+    }
+
+    @Unique
+    private boolean minemoticon$usesTextBold(FontSource source, boolean bold) {
+        return bold && minemoticon$isTextRunSource(source) && source.supportsTextBold();
     }
 
     @Unique

@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_MULTIPLE_MASTERS_H
 
 /* --- Helper functions --- */
 
@@ -152,6 +153,33 @@ JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Select_1Size(
 }
 JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Set_1Char_1Size(JNIEnv *env, jclass obj, jlong face, jint char_width, jint char_height, jint horz_resolution, jint vert_resolution) {
 	return FT_Set_Char_Size((FT_Face)face, char_width, char_height, horz_resolution, vert_resolution);
+}
+JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Set_1Var_1Design_1Coordinates(JNIEnv *env, jclass obj, jlong face, jfloatArray coords) {
+	if (!coords)
+		return JNI_FALSE;
+
+	jsize count = (*env)->GetArrayLength(env, coords);
+	if (count <= 0)
+		return JNI_FALSE;
+
+	jfloat* values = (*env)->GetFloatArrayElements(env, coords, 0);
+	if (!values)
+		return JNI_FALSE;
+
+	FT_Fixed* fixed = (FT_Fixed*)malloc(sizeof(FT_Fixed) * count);
+	if (!fixed) {
+		(*env)->ReleaseFloatArrayElements(env, coords, values, JNI_ABORT);
+		return JNI_FALSE;
+	}
+
+	for (jsize i = 0; i < count; i++)
+		fixed[i] = (FT_Fixed)(values[i] * 65536.0f);
+
+	FT_Error err = FT_Set_Var_Design_Coordinates((FT_Face)face, (FT_UInt)count, fixed);
+
+	free(fixed);
+	(*env)->ReleaseFloatArrayElements(env, coords, values, JNI_ABORT);
+	return err == 0 ? JNI_TRUE : JNI_FALSE;
 }
 JNIEXPORT jboolean JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Load_1Glyph(JNIEnv *env, jclass obj, jlong face, jint glyphIndex, jint loadFlags) {
 	return FT_Load_Glyph((FT_Face)face, glyphIndex, loadFlags);
@@ -340,11 +368,11 @@ JNIEXPORT jshort JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Get_1FSType_1Fl
 	return FT_Get_FSType_Flags((FT_Face)face);
 }
 
-JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1Kerning(JNIEnv *env, jclass obj, jlong face, jchar left, jchar right, jint mode) {
+JNIEXPORT jobject JNICALL Java_com_mlomb_freetypejni_FreeType_FT_1Face_1Get_1Kerning(JNIEnv *env, jclass obj, jlong face, jint left, jint right, jint mode) {
 	FT_Vector vector;
 	int x = 0;
 	int y = 0;
-	if (!FT_Get_Kerning((FT_Face)face, left, right, mode, &vector)) {
+	if (!FT_Get_Kerning((FT_Face)face, (FT_UInt)left, (FT_UInt)right, mode, &vector)) {
 		x = vector.x;
 		y = vector.y;
 	}

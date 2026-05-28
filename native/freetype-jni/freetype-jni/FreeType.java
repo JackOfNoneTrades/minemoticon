@@ -36,7 +36,7 @@ public class FreeType {
 	public static native long    FT_Face_Get_glyph              (long face); /* Pointer to FT_GlyphSlot */
 	public static native long    FT_Face_Get_size               (long face); /* Pointer to FT_Size */
 	public static native long    FT_Get_Track_Kerning           (long face, long point_size, int degree);
-	public static native Kerning FT_Face_Get_Kerning            (long face, char left, char right, int mode);
+	public static native Kerning FT_Face_Get_Kerning            (long face, int left, int right, int mode);
 	
 	public static native boolean FT_Done_Face                (long face);
 	public static native boolean FT_Reference_Face           (long face);
@@ -61,6 +61,7 @@ public class FreeType {
 	public static native boolean FT_Set_Pixel_Sizes          (long face, float width, float height);
 	public static native boolean FT_Load_Glyph               (long face, int glyphIndex, int loadFlags);
 	public static native boolean FT_Set_Char_Size            (long face, int char_width, int char_height, int horz_resolution, int vert_resolution);
+	public static native boolean FT_Set_Var_Design_Coordinates(long face, float[] coords);
 
 	// ---- Size
 	public static native long FT_Size_Get_metrics(long size); /* Pointer to SizeMetrics */

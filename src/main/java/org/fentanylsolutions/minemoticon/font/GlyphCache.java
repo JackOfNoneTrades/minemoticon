@@ -30,6 +30,7 @@ public class GlyphCache {
     private static final int MAX_SIZE = 2048;
 
     private final FontSource source;
+    private final boolean textBold;
     private final String textureName;
     private ResourceLocation resourceLocation;
 
@@ -56,7 +57,13 @@ public class GlyphCache {
     private static final Map<String, GlyphCache> INSTANCES = new HashMap<>();
 
     public static GlyphCache forSource(FontSource source) {
-        return INSTANCES.computeIfAbsent(source.getId(), id -> new GlyphCache(source));
+        return forSource(source, false);
+    }
+
+    public static GlyphCache forSource(FontSource source, boolean textBold) {
+        boolean activeBold = textBold && source.supportsTextBold();
+        String key = cacheKey(source.getId(), activeBold);
+        return INSTANCES.computeIfAbsent(key, id -> new GlyphCache(source, activeBold));
     }
 
     public static void invalidateAll() {
@@ -67,7 +74,8 @@ public class GlyphCache {
         if (sourceId == null) {
             return;
         }
-        INSTANCES.remove(sourceId);
+        INSTANCES.remove(cacheKey(sourceId, false));
+        INSTANCES.remove(cacheKey(sourceId, true));
     }
 
     public static void dumpAllAtlases(File dir) throws IOException {
@@ -80,9 +88,10 @@ public class GlyphCache {
         }
     }
 
-    private GlyphCache(FontSource source) {
+    private GlyphCache(FontSource source, boolean textBold) {
         this.source = source;
-        this.textureName = "glyph_cache_" + sanitizeTextureName(source.getId());
+        this.textBold = textBold;
+        this.textureName = "glyph_cache_" + sanitizeTextureName(source.getId()) + (textBold ? "_bold" : "");
         this.atlasImage = minemoticon$createAtlasImage(atlasWidth, atlasHeight, source.usesTextColor());
         this.texture = new GlyphAtlasTexture(this.atlasImage, source.usesTextColor());
     }
@@ -124,7 +133,7 @@ public class GlyphCache {
         if (explicitAdvance != null) return explicitAdvance;
 
         int renderSize = minemoticon$getRenderSize();
-        float measuredAdvance = source.getTextGlyphAdvance(codepoint, renderSize);
+        float measuredAdvance = source.getTextGlyphAdvance(codepoint, renderSize, textBold);
         if (measuredAdvance > 0.0f) {
             float advance = measuredAdvance * minemoticon$getDisplayHeight() / renderSize;
             advanceMap.put(codepoint, advance);
@@ -165,13 +174,13 @@ public class GlyphCache {
     private void renderGlyph(int codepoint) {
         boolean preserveLineMetrics = source.preserveTextLineMetrics();
         int renderSize = minemoticon$getRenderSize();
-        BufferedImage glyph = preserveLineMetrics ? source.renderTextGlyph(codepoint, renderSize)
+        BufferedImage glyph = preserveLineMetrics ? source.renderTextGlyph(codepoint, renderSize, textBold)
             : source.renderGlyph(codepoint, renderSize);
-        float measuredAdvance = source.getTextGlyphAdvance(codepoint, renderSize);
+        float measuredAdvance = source.getTextGlyphAdvance(codepoint, renderSize, textBold);
         if (measuredAdvance > 0.0f) {
             advanceMap.put(codepoint, measuredAdvance * minemoticon$getDisplayHeight() / renderSize);
         }
-        float sourceOffsetX = preserveLineMetrics ? source.getTextGlyphOffsetX(codepoint, renderSize) : 0.0f;
+        float sourceOffsetX = preserveLineMetrics ? source.getTextGlyphOffsetX(codepoint, renderSize, textBold) : 0.0f;
         if (glyph == null) return;
 
         // Compute tight visible bounds
@@ -302,6 +311,10 @@ public class GlyphCache {
         return sourceId.replaceAll("[^a-zA-Z0-9._-]", "_");
     }
 
+    private static String cacheKey(String sourceId, boolean textBold) {
+        return sourceId + "\u0000" + textBold;
+    }
+
     private static BufferedImage minemoticon$createAtlasImage(int width, int height, boolean textSource) {
         var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         if (textSource) {
@@ -323,7 +336,7 @@ public class GlyphCache {
         var g = snapshot.createGraphics();
         g.drawImage(atlasImage, 0, 0, null);
         g.dispose();
-        ImageIO.write(snapshot, "png", new File(dir, source.getId() + ".png"));
+        ImageIO.write(snapshot, "png", new File(dir, source.getId() + (textBold ? "_bold" : "") + ".png"));
     }
 
     static class GlyphAtlasTexture extends DynamicTexture {

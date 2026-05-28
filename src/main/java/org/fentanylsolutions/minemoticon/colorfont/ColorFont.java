@@ -124,10 +124,14 @@ public class ColorFont {
 
         Font awtShapingFont = null;
         try {
-            awtShapingFont = Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(reader.getFontData()))
+            Font baseFont = Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(reader.getFontData()))
                 .deriveFont((float) head.unitsPerEm);
-            awtShapingFont = applyVariationSettings(awtShapingFont, variationAxes, variationSettings);
+            awtShapingFont = applyVariationSettings(baseFont, variationAxes, variationSettings);
         } catch (Exception ignored) {}
+
+        if (ftRenderer != null) {
+            ftRenderer.configureVariations(variationAxes, variationSettings);
+        }
 
         return new ColorFont(
             cmapTable,
@@ -146,6 +150,10 @@ public class ColorFont {
 
     public List<VariationAxis> getVariationAxes() {
         return variationAxes;
+    }
+
+    public boolean supportsTextBold() {
+        return freetype != null && freetype.supportsBoldVariation();
     }
 
     public boolean hasAnyColorGlyphs() {
@@ -249,6 +257,13 @@ public class ColorFont {
     }
 
     public BufferedImage renderTextGlyph(int codepoint, int size) {
+        return renderTextGlyph(codepoint, size, false);
+    }
+
+    public BufferedImage renderTextGlyph(int codepoint, int size, boolean bold) {
+        if (bold && supportsTextBold()) {
+            return freetype.renderTextGlyph(codepoint, size, true, ascent, descent);
+        }
         if (shapingFont == null) return renderGlyph(codepoint, size);
 
         GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
@@ -291,6 +306,13 @@ public class ColorFont {
     }
 
     public float getTextGlyphAdvance(int codepoint, int size) {
+        return getTextGlyphAdvance(codepoint, size, false);
+    }
+
+    public float getTextGlyphAdvance(int codepoint, int size, boolean bold) {
+        if (bold && supportsTextBold()) {
+            return freetype.getTextGlyphAdvance(codepoint, size, true);
+        }
         if (shapingFont == null) return -1.0f;
 
         GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
@@ -304,6 +326,13 @@ public class ColorFont {
     }
 
     public float getTextGlyphOffsetX(int codepoint, int size) {
+        return getTextGlyphOffsetX(codepoint, size, false);
+    }
+
+    public float getTextGlyphOffsetX(int codepoint, int size, boolean bold) {
+        if (bold && supportsTextBold()) {
+            return freetype.getTextGlyphOffsetX(codepoint, size, true);
+        }
         if (shapingFont == null) return 0.0f;
 
         GlyphVector glyphVector = layoutSingleGlyphVector(codepoint);
@@ -324,6 +353,13 @@ public class ColorFont {
     }
 
     public org.fentanylsolutions.minemoticon.font.TextRunLayout layoutTextRun(String text, int size) {
+        return layoutTextRun(text, size, false);
+    }
+
+    public org.fentanylsolutions.minemoticon.font.TextRunLayout layoutTextRun(String text, int size, boolean bold) {
+        if (bold && supportsTextBold()) {
+            return freetype.layoutTextRun(text, size, true);
+        }
         if (shapingFont == null || text == null || text.isEmpty()) return null;
 
         GlyphVector glyphVector = shapingFont

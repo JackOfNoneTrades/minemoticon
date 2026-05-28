@@ -69,6 +69,7 @@ pub fn build(b: *std.Build) void {
     freetype_flags.appendSlice(&.{
         "-std=c99",
         "-DFT2_BUILD_LIBRARY",
+        "-DTT_CONFIG_OPTION_GPOS_KERNING",
     }) catch @panic("out of memory");
 
     if (target.result.os.tag != .windows) {

@@ -26,6 +26,10 @@ public abstract class FontSource {
         return renderGlyph(codepoint, size);
     }
 
+    public BufferedImage renderTextGlyph(int codepoint, int size, boolean bold) {
+        return renderTextGlyph(codepoint, size);
+    }
+
     public abstract boolean canRender(int[] codepoints);
 
     public abstract BufferedImage renderGlyphs(int[] codepoints, int size);
@@ -34,12 +38,28 @@ public abstract class FontSource {
         return -1.0f;
     }
 
+    public float getTextGlyphAdvance(int codepoint, int size, boolean bold) {
+        return getTextGlyphAdvance(codepoint, size);
+    }
+
     public float getTextGlyphOffsetX(int codepoint, int size) {
         return 0.0f;
     }
 
+    public float getTextGlyphOffsetX(int codepoint, int size, boolean bold) {
+        return getTextGlyphOffsetX(codepoint, size);
+    }
+
     public TextRunLayout layoutTextRun(String text, int size) {
         return null;
+    }
+
+    public TextRunLayout layoutTextRun(String text, int size, boolean bold) {
+        return layoutTextRun(text, size);
+    }
+
+    public boolean supportsTextBold() {
+        return false;
     }
 
     public boolean preserveTextLineMetrics() {

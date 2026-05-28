@@ -117,16 +117,20 @@ public class Face extends Pointer {
 		return FreeType.FT_Load_Char(pointer, c, flags);
 	}
 
-	public Kerning getKerning(char left, char right) {
+	public Kerning getKerning(int left, int right) {
 		return getKerning(left, right, FT_Kerning_Mode.FT_KERNING_DEFAULT);
 	}
 
-	public Kerning getKerning(char left, char right, FT_Kerning_Mode mode) {
+	public Kerning getKerning(int left, int right, FT_Kerning_Mode mode) {
 		return FreeType.FT_Face_Get_Kerning(pointer, left, right, mode.ordinal());
 	}
 
 	public boolean setPixelSizes(float width, float height) {
 		return FreeType.FT_Set_Pixel_Sizes(pointer, width, height);
+	}
+
+	public boolean setVarDesignCoordinates(float[] coords) {
+		return FreeType.FT_Set_Var_Design_Coordinates(pointer, coords);
 	}
 
 	public GlyphSlot getGlyphSlot() {

@@ -89,6 +89,14 @@ public class CustomFontSource extends FontSource {
     }
 
     @Override
+    public BufferedImage renderTextGlyph(int codepoint, int size, boolean bold) {
+        if (colorFont.hasAnyColorGlyphs()) {
+            return colorFont.renderGlyph(codepoint, size);
+        }
+        return colorFont.renderTextGlyph(codepoint, size, bold);
+    }
+
+    @Override
     public boolean canRender(int[] codepoints) {
         return colorFont.canRender(codepoints);
     }
@@ -107,6 +115,14 @@ public class CustomFontSource extends FontSource {
     }
 
     @Override
+    public float getTextGlyphAdvance(int codepoint, int size, boolean bold) {
+        if (colorFont.hasAnyColorGlyphs()) {
+            return -1.0f;
+        }
+        return colorFont.getTextGlyphAdvance(codepoint, size, bold);
+    }
+
+    @Override
     public float getTextGlyphOffsetX(int codepoint, int size) {
         if (colorFont.hasAnyColorGlyphs()) {
             return 0.0f;
@@ -115,11 +131,32 @@ public class CustomFontSource extends FontSource {
     }
 
     @Override
+    public float getTextGlyphOffsetX(int codepoint, int size, boolean bold) {
+        if (colorFont.hasAnyColorGlyphs()) {
+            return 0.0f;
+        }
+        return colorFont.getTextGlyphOffsetX(codepoint, size, bold);
+    }
+
+    @Override
     public TextRunLayout layoutTextRun(String text, int size) {
         if (colorFont.hasAnyColorGlyphs()) {
             return null;
         }
         return colorFont.layoutTextRun(text, size);
+    }
+
+    @Override
+    public TextRunLayout layoutTextRun(String text, int size, boolean bold) {
+        if (colorFont.hasAnyColorGlyphs()) {
+            return null;
+        }
+        return colorFont.layoutTextRun(text, size, bold);
+    }
+
+    @Override
+    public boolean supportsTextBold() {
+        return !colorFont.hasAnyColorGlyphs() && colorFont.supportsTextBold();
     }
 
     @Override
