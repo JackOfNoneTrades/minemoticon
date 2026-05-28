@@ -1,5 +1,7 @@
 package org.fentanylsolutions.minemoticon.font;
 
+import java.awt.AlphaComposite;
+import java.awt.Color;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
@@ -81,7 +83,7 @@ public class GlyphCache {
     private GlyphCache(FontSource source) {
         this.source = source;
         this.textureName = "glyph_cache_" + sanitizeTextureName(source.getId());
-        this.atlasImage = new BufferedImage(atlasWidth, atlasHeight, BufferedImage.TYPE_INT_ARGB);
+        this.atlasImage = minemoticon$createAtlasImage(atlasWidth, atlasHeight, source.usesTextColor());
         this.texture = new GlyphAtlasTexture(this.atlasImage, source.usesTextColor());
     }
 
@@ -263,7 +265,7 @@ public class GlyphCache {
 
     private void growAtlas() {
         int newHeight = Math.min(atlasHeight * 2, MAX_SIZE);
-        var newImage = new BufferedImage(atlasWidth, newHeight, BufferedImage.TYPE_INT_ARGB);
+        var newImage = minemoticon$createAtlasImage(atlasWidth, newHeight, source.usesTextColor());
         var g = newImage.createGraphics();
         g.drawImage(atlasImage, 0, 0, null);
         g.dispose();
@@ -298,6 +300,22 @@ public class GlyphCache {
 
     private static String sanitizeTextureName(String sourceId) {
         return sourceId.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private static BufferedImage minemoticon$createAtlasImage(int width, int height, boolean textSource) {
+        var image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        if (textSource) {
+            minemoticon$fillTransparentWhite(image);
+        }
+        return image;
+    }
+
+    private static void minemoticon$fillTransparentWhite(BufferedImage image) {
+        var g = image.createGraphics();
+        g.setComposite(AlphaComposite.Src);
+        g.setColor(new Color(255, 255, 255, 0));
+        g.fillRect(0, 0, image.getWidth(), image.getHeight());
+        g.dispose();
     }
 
     private synchronized void dumpAtlas(File dir) throws IOException {
