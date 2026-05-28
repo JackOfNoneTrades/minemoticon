@@ -207,8 +207,8 @@ public class ClientEmojiHandler {
                 registration.category,
                 registration.resourceLocation);
             EMOJI_LOOKUP.put(emoji.getNamespaced(), emoji);
-            registerShortName(emoji.getNamespaced(), emoji);
             if (!registration.hideFromPicker) {
+                registerShortName(emoji.getNamespaced(), emoji);
                 EMOJI_MAP.computeIfAbsent(registration.category, ignored -> new ArrayList<>())
                     .add(emoji);
                 EMOJI_LIST.add(emoji);

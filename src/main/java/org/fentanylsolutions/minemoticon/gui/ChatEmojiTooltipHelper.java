@@ -15,6 +15,7 @@ import org.fentanylsolutions.minemoticon.api.RenderableEmoji;
 import org.fentanylsolutions.minemoticon.network.EmoteClientHandler;
 import org.fentanylsolutions.minemoticon.render.EmojiRenderer;
 import org.fentanylsolutions.minemoticon.text.EmojiPua;
+import org.fentanylsolutions.minemoticon.text.TextStyleCompat;
 
 public final class ChatEmojiTooltipHelper {
 
@@ -54,6 +55,10 @@ public final class ChatEmojiTooltipHelper {
             appendText(rebuilt, text, style.createDeepCopy());
             return false;
         }
+        if (emojiSplitWouldLoseInlineStyle(text, segments)) {
+            appendText(rebuilt, text, style.createDeepCopy());
+            return false;
+        }
 
         for (EmojiRenderer.ParsedSegment segment : segments) {
             if (segment.isEmoji()) {
@@ -71,6 +76,21 @@ public final class ChatEmojiTooltipHelper {
         }
 
         return true;
+    }
+
+    private static boolean emojiSplitWouldLoseInlineStyle(String text, List<EmojiRenderer.ParsedSegment> segments) {
+        int offset = 0;
+        for (EmojiRenderer.ParsedSegment segment : segments) {
+            if (segment.isEmoji()) {
+                if (!TextStyleCompat.activeFormatPrefix(text, offset)
+                    .isEmpty()) {
+                    return true;
+                }
+            }
+            offset += segment.getText()
+                .length();
+        }
+        return false;
     }
 
     private static void appendText(ChatComponentText rebuilt, String text, ChatStyle style) {
