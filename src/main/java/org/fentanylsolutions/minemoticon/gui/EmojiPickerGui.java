@@ -32,6 +32,7 @@ public class EmojiPickerGui {
     private static final int SCROLLBAR_W = 4;
     private static final int SEARCH_H = 14;
     private static final int INFO_H = 14;
+    private static final int BUTTON_EMOJI_WARMUP_DELAY_FRAMES = 12;
     private static final float EASE = 0.2f;
     private static final float SNAP = 0.05f;
 
@@ -42,6 +43,8 @@ public class EmojiPickerGui {
 
     private boolean open;
     private RenderableEmoji buttonEmoji;
+    private int buttonEmojiWarmupFrames;
+    private boolean buttonEmojiWarmupStarted;
     private Emoji hoveredEmoji;
     private String hoveredCategory;
     private List<Object> filteredLines = new ArrayList<>();
@@ -191,9 +194,7 @@ public class EmojiPickerGui {
     // -- Rendering --
 
     public void render(int mouseX, int mouseY) {
-        if (buttonEmoji != null) {
-            renderButtonEmoji(mouseX, mouseY);
-        }
+        renderButton(mouseX, mouseY);
 
         if (!open) return;
 
@@ -442,6 +443,47 @@ public class EmojiPickerGui {
         Gui.drawRect(tipX - 2, tipY - 2, tipX + textW + 2, tipY + 12, 0xE0000000);
         Gui.drawRect(tipX - 2, tipY - 2, tipX + textW + 2, tipY - 1, 0x505050FF);
         font.drawStringWithShadow(text, tipX, tipY, 0xFFFFFF);
+    }
+
+    private void renderButton(int mouseX, int mouseY) {
+        if (buttonEmoji == null) {
+            renderFallbackButton(mouseX, mouseY);
+            return;
+        }
+
+        if (!open && !buttonEmoji.isLoaded() && !shouldWarmupButtonEmoji()) {
+            renderFallbackButton(mouseX, mouseY);
+            return;
+        }
+
+        if (!buttonEmoji.isLoaded()) {
+            renderFallbackButton(mouseX, mouseY);
+        }
+        renderButtonEmoji(mouseX, mouseY);
+        if (!buttonEmoji.isLoaded()) {
+            renderFallbackButton(mouseX, mouseY);
+        }
+    }
+
+    private boolean shouldWarmupButtonEmoji() {
+        if (buttonEmojiWarmupStarted) {
+            return true;
+        }
+        if (buttonEmojiWarmupFrames++ < BUTTON_EMOJI_WARMUP_DELAY_FRAMES) {
+            return false;
+        }
+
+        if (buttonEmoji.getResourceLocation() == null) {
+            return false;
+        }
+        buttonEmojiWarmupStarted = true;
+        return true;
+    }
+
+    private void renderFallbackButton(int mouseX, int mouseY) {
+        boolean hovered = mouseX >= buttonX && mouseX < buttonX + CELL && mouseY >= buttonY && mouseY < buttonY + CELL;
+        int textColor = hovered || open ? 0xFFE6E6E6 : 0xFF999999;
+        font.drawStringWithShadow(":)", buttonX, buttonY + 1, textColor);
     }
 
     private void renderButtonEmoji(int mouseX, int mouseY) {
