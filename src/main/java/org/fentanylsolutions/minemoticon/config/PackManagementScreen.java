@@ -84,6 +84,7 @@ public class PackManagementScreen extends GuiScreen implements DropListener {
     private int statusColor = 0xFFB0B0B0;
     private long statusUntilMs;
     private String pendingNewPackName;
+    private volatile boolean emojiPickerActive;
     private volatile boolean dragDropActive;
     private volatile float dragDropSdlX = -1.0F;
     private volatile float dragDropSdlY = -1.0F;
@@ -703,21 +704,30 @@ public class PackManagementScreen extends GuiScreen implements DropListener {
     }
 
     private void addEmojiToPack(PackCard card) {
-        FileUtil.FilePickerResult result = FileUtil.pickFile("Select emoji file", card.folder, SUPPORTED_EXTENSIONS);
-
-        switch (result.getStatus()) {
-            case CANCELLED:
-                return;
-            case UNAVAILABLE:
-            case ERROR:
-                showStatus(result.getMessage(), 0xFFFF8080);
-                return;
-            case SELECTED:
-                break;
+        if (emojiPickerActive) {
+            showStatus("Emoji file picker is already open", 0xFFE0D080);
+            return;
         }
 
-        File source = result.getFile();
-        addEmojiFileToPack(card, source);
+        File targetFolder = card.folder;
+        String cardTitle = card.getCardTitle();
+        emojiPickerActive = true;
+        showStatus("Select an emoji file...", 0xFFB0B0B0);
+
+        Thread pickerThread = new Thread(() -> {
+            EmojiImportResult importResult;
+            try {
+                FileUtil.FilePickerResult pickerResult = FileUtil
+                    .pickFile("Select emoji file", targetFolder, SUPPORTED_EXTENSIONS);
+                importResult = handlePickedEmojiFile(targetFolder, cardTitle, pickerResult);
+            } catch (Throwable t) {
+                Minemoticon.LOG.warn("File picker failed", t);
+                importResult = EmojiImportResult.error("File picker failed");
+            }
+            finishAsyncEmojiImport(importResult);
+        }, "Minemoticon-EmojiFilePicker");
+        pickerThread.setDaemon(true);
+        pickerThread.start();
     }
 
     private void createNewPack(String requestedDisplayName) {
@@ -878,6 +888,91 @@ public class PackManagementScreen extends GuiScreen implements DropListener {
             Minemoticon.LOG.error("Failed to add emoji {} to {}", source, card.folder.getName(), e);
             showStatus("Failed to add emoji", 0xFFFF8080);
         }
+    }
+
+    private EmojiImportResult handlePickedEmojiFile(File targetFolder, String cardTitle,
+        FileUtil.FilePickerResult pickerResult) {
+
+        if (pickerResult == null) {
+            return EmojiImportResult.error("File picker failed");
+        }
+
+        switch (pickerResult.getStatus()) {
+            case CANCELLED:
+                return EmojiImportResult.cancelled();
+            case UNAVAILABLE:
+            case ERROR:
+                return EmojiImportResult.error(messageOrDefault(pickerResult.getMessage(), "File picker failed"));
+            case SELECTED:
+                break;
+        }
+
+        File source = pickerResult.getFile();
+        if (source == null || !EmojiPackLoader.isSupportedEmojiFile(source)) {
+            return EmojiImportResult.error("Selected file is not a supported emoji image");
+        }
+        if (targetFolder == null || !targetFolder.isDirectory()) {
+            return EmojiImportResult.error("Target pack no longer exists");
+        }
+
+        String extension = getExtension(source.getName());
+        String baseName = sanitizeEmojiName(stripExtension(source.getName()));
+        if (baseName.isEmpty()) {
+            baseName = "emoji";
+        }
+
+        File target = uniqueEmojiFile(targetFolder, baseName, extension, null);
+        try {
+            Files.copy(source.toPath(), target.toPath());
+        } catch (IOException e) {
+            Minemoticon.LOG.error("Failed to add emoji {} to {}", source, targetFolder.getName(), e);
+            return EmojiImportResult.error("Failed to add emoji");
+        }
+
+        String emojiName = stripExtension(target.getName());
+        return EmojiImportResult.success(targetFolder, emojiName, "Added " + emojiName + " to " + cardTitle);
+    }
+
+    private void finishAsyncEmojiImport(EmojiImportResult result) {
+        runOnClientThread(() -> {
+            emojiPickerActive = false;
+
+            if (result == null || result.cancelled) {
+                return;
+            }
+
+            if (!result.success) {
+                if (Minecraft.getMinecraft().currentScreen == this) {
+                    showStatus(result.message, result.color);
+                }
+                return;
+            }
+
+            GuiScreen currentScreen = Minecraft.getMinecraft().currentScreen;
+            if (currentScreen instanceof PackManagementScreen) {
+                ((PackManagementScreen) currentScreen).reloadClientPacks(
+                    result.targetFolder.getAbsolutePath(),
+                    result.emojiName,
+                    result.message,
+                    result.color);
+            } else {
+                ClientEmojiHandler.reloadPacks();
+            }
+        });
+    }
+
+    private static void runOnClientThread(Runnable action) {
+        Minecraft minecraft = Minecraft.getMinecraft();
+        if (minecraft.func_152345_ab()) {
+            action.run();
+        } else {
+            minecraft.func_152344_a(action);
+        }
+    }
+
+    private static String messageOrDefault(String message, String fallback) {
+        return message != null && !message.trim()
+            .isEmpty() ? message : fallback;
     }
 
     private static File uniqueEmojiFile(File folder, String baseName, String extension, File existingFile) {
@@ -1546,6 +1641,39 @@ public class PackManagementScreen extends GuiScreen implements DropListener {
             this.name = name;
             this.extension = extension;
             this.preview = preview;
+        }
+    }
+
+    private static final class EmojiImportResult {
+
+        final boolean success;
+        final boolean cancelled;
+        final File targetFolder;
+        final String emojiName;
+        final String message;
+        final int color;
+
+        private EmojiImportResult(boolean success, boolean cancelled, File targetFolder, String emojiName,
+            String message, int color) {
+
+            this.success = success;
+            this.cancelled = cancelled;
+            this.targetFolder = targetFolder;
+            this.emojiName = emojiName;
+            this.message = message;
+            this.color = color;
+        }
+
+        static EmojiImportResult success(File targetFolder, String emojiName, String message) {
+            return new EmojiImportResult(true, false, targetFolder, emojiName, message, 0xFF80FF80);
+        }
+
+        static EmojiImportResult error(String message) {
+            return new EmojiImportResult(false, false, null, null, message, 0xFFFF8080);
+        }
+
+        static EmojiImportResult cancelled() {
+            return new EmojiImportResult(false, true, null, null, null, 0);
         }
     }
 
