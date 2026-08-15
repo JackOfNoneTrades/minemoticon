@@ -8,6 +8,7 @@ import org.fentanylsolutions.minemoticon.EmojiConfig;
 import org.fentanylsolutions.minemoticon.Minemoticon;
 import org.fentanylsolutions.minemoticon.ServerConfig;
 
+import com.falsepattern.deploader.DeploaderStub;
 import com.gtnewhorizon.gtnhlib.config.ConfigException;
 import com.gtnewhorizon.gtnhlib.config.ConfigurationManager;
 
@@ -16,6 +17,11 @@ import cpw.mods.fml.relauncher.IFMLLoadingPlugin;
 @SuppressWarnings("unused")
 @IFMLLoadingPlugin.MCVersion("1.7.10")
 public class EarlyMixinLoader extends FentEarlyMixinLoader {
+
+    static {
+        DeploaderStub.bootstrap(false);
+        DeploaderStub.runDepLoader();
+    }
 
     public EarlyMixinLoader() {
         try {

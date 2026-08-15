@@ -1,0 +1,15 @@
+{
+  "identifier": "falsepatternlib_dependencies",
+  "repositories": [
+    "https://repo.maven.apache.org/maven2/"
+  ],
+  "dependencies": {
+    "always": {
+      "common": [
+        "com.github.weisj:jsvg:${jsvgVersion}"
+      ],
+      "client": [],
+      "server": []
+    }
+  }
+}
