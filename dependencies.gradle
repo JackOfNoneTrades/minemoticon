@@ -60,19 +60,19 @@ dependencies {
     shadowImplementation("com.falsepattern:falsepatternlib-mc1.7.10:${fplibDepLoaderVersion}:deploader_stub") // LGPL 3.0
 
     //runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.7.69-GTNH:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.157:dev")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.100-GTNH:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Hodgepodge:2.7.188:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:NotEnoughItems:2.8.125-GTNH:dev")
     runtimeOnlyNonPublishable("curse.maven:archaicfix-677782:6785842")
-    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:2.1.29:dev")
+    runtimeOnlyNonPublishable("com.github.GTNewHorizons:Angelica:2.2.5:dev")
     runtimeOnlyNonPublishable(rfg.deobf("curse.maven:catalogue-vintage-1465746:7695645")) // 1.0.2-1.7.10
     runtimeOnlyNonPublishable("org.fentanylsolutions.wawelauth:WawelAuth:fd1bd1d-snapshot")
 
-    implementation("com.github.GTNewHorizons:GTNHLib:0.11.4:dev")
+    implementation("com.github.GTNewHorizons:GTNHLib:0.11.37:dev")
 
     // Downloaded by DepLoader in the regular jar and bundled in the fat jar.
     fatImplementation("com.github.weisj:jsvg:${jsvgVersion}")
 
-    devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:0.0.49:dev")
+    devOnlyNonPublishable("org.fentanylsolutions.fentlib:FentLib:0.0.54:dev")
     //devOnlyNonPublishable("org.fentanylsolutions.tabfaces:TabFaces:b7968cf-snapshot")
-    devOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.72-1.7.10:dev")
+    devOnlyNonPublishable("com.github.GTNewHorizons:ModularUI2:2.3.85-1.7.10:dev")
 }

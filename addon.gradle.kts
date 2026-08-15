@@ -274,8 +274,11 @@ plugins.withId("net.darkhax.curseforgegradle") {
     afterEvaluate {
         tasks.named<TaskPublishCurseForge>("publishCurseforge").configure {
             dependsOn(fatJar)
-            uploadArtifacts.firstOrNull()?.withAdditionalFile(fatJar)?.displayName = providers.provider {
-                "$configuredModName ${project.version}-fat"
+            uploadArtifacts.firstOrNull()?.let { artifact ->
+                artifact.addEnvironment("Client", "Server")
+                artifact.withAdditionalFile(fatJar).displayName = providers.provider {
+                    "$configuredModName ${project.version}-fat"
+                }
             }
         }
     }
