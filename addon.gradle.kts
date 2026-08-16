@@ -3,8 +3,12 @@ import net.darkhax.curseforgegradle.TaskPublishCurseForge
 import org.gradle.api.artifacts.dsl.RepositoryHandler
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository
 import org.gradle.api.provider.ListProperty
+import org.gradle.api.publish.PublishingExtension
+import org.gradle.api.publish.maven.MavenPublication
+import org.gradle.api.tasks.TaskProvider
 import org.gradle.jvm.tasks.Jar
 import org.gradle.language.jvm.tasks.ProcessResources
+import java.util.zip.ZipFile
 
 val fentMavenName = "Fent Maven"
 val fentMavenUrl = uri("https://maven.fentanylsolutions.org/releases")
@@ -207,21 +211,35 @@ tasks.named("jar").configure {
 
 val baseJar = tasks.named<Jar>("jar")
 val reobfJar = tasks.named<Jar>("reobfJar")
+val shadedDevJar = tasks.named<Jar>("shadowJar")
 
-val fatJar = tasks.register<Jar>("fatJar") {
+// Keep self-contained jars as the default artifacts. DepLoader jars remain
+// available behind explicit slim classifiers for users who prefer them.
+reobfJar.configure {
+    archiveClassifier.set("slim")
+}
+shadedDevJar.configure {
+    archiveClassifier.set("slim-dev")
+}
+
+fun Jar.configureFatJar(sourceJar: TaskProvider<out Jar>, classifier: String) {
     group = "build"
-    description = "Builds a fully bundled MineMoticon jar."
+    description = if (classifier.isEmpty()) {
+        "Builds the fully bundled default jar."
+    } else {
+        "Builds a fully bundled $classifier jar."
+    }
     notCompatibleWithConfigurationCache("Unpacks runtime dependencies into the fat distribution jar.")
 
-    dependsOn(reobfJar)
+    dependsOn(sourceJar)
 
     archiveBaseName.set(baseJar.flatMap { it.archiveBaseName })
     archiveVersion.set(baseJar.flatMap { it.archiveVersion })
-    archiveClassifier.set("fat")
+    archiveClassifier.set(classifier)
     destinationDirectory.set(layout.buildDirectory.dir("libs"))
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-    from(reobfJar.flatMap { it.archiveFile }.map { zipTree(it) }) {
+    from(sourceJar.flatMap { it.archiveFile }.map { zipTree(it) }) {
         exclude(
             "META-INF/MANIFEST.MF",
             "META-INF/minemoticon_dependencies.json",
@@ -248,12 +266,90 @@ val fatJar = tasks.register<Jar>("fatJar") {
     }
 }
 
-tasks.named("assemble").configure {
-    dependsOn(fatJar)
+val fatJar = tasks.register<Jar>("fatJar") {
+    configureFatJar(reobfJar, "")
 }
 
-// Publish the fat jar as an additional file wherever the configured publishing
-// plugins support it. The normal DepLoader jar remains the primary artifact.
+val fatDevJar = tasks.register<Jar>("fatDevJar") {
+    configureFatJar(shadedDevJar, "dev")
+}
+
+tasks.named("assemble").configure {
+    dependsOn(fatJar, fatDevJar)
+}
+
+fun replaceOutgoingJar(configurationName: String, jarTask: TaskProvider<out Jar>) {
+    configurations.named(configurationName).configure {
+        outgoing.artifacts.clear()
+        outgoing.artifact(jarTask)
+    }
+}
+
+replaceOutgoingJar("apiElements", fatDevJar)
+replaceOutgoingJar("runtimeElements", fatDevJar)
+replaceOutgoingJar("reobfElements", fatJar)
+
+plugins.withId("maven-publish") {
+    extensions.getByType(PublishingExtension::class.java)
+        .publications
+        .withType(MavenPublication::class.java)
+        .configureEach {
+            artifact(reobfJar)
+            artifact(shadedDevJar)
+        }
+}
+
+val verifyDistributionJars = tasks.register("verifyDistributionJars") {
+    group = "verification"
+    description = "Verifies default jars are bundled and slim jars retain DepLoader metadata."
+    notCompatibleWithConfigurationCache("Scans distribution jar contents.")
+    dependsOn(fatJar, fatDevJar, reobfJar, shadedDevJar)
+    inputs.files(
+        fatJar.flatMap { it.archiveFile },
+        fatDevJar.flatMap { it.archiveFile },
+        reobfJar.flatMap { it.archiveFile },
+        shadedDevJar.flatMap { it.archiveFile },
+    )
+
+    doLast {
+        val dependencyDescriptor = "META-INF/minemoticon_dependencies.json"
+        val bundledEntry = "com/github/weisj/jsvg/SVGDocument.class"
+
+        fun entriesOf(archive: File): Set<String> = ZipFile(archive).use { zip ->
+            buildSet {
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    add(entries.nextElement().name)
+                }
+            }
+        }
+
+        listOf(fatJar.get(), fatDevJar.get()).forEach { task ->
+            val archive = task.archiveFile.get().asFile
+            val entries = entriesOf(archive)
+            check(bundledEntry in entries) { "Bundled archive ${archive.name} is missing $bundledEntry" }
+            check(dependencyDescriptor !in entries) {
+                "Bundled archive ${archive.name} still contains $dependencyDescriptor"
+            }
+        }
+
+        listOf(reobfJar.get(), shadedDevJar.get()).forEach { task ->
+            val archive = task.archiveFile.get().asFile
+            val entries = entriesOf(archive)
+            check(dependencyDescriptor in entries) {
+                "Slim archive ${archive.name} is missing $dependencyDescriptor"
+            }
+            check(bundledEntry !in entries) { "Slim archive ${archive.name} unexpectedly contains $bundledEntry" }
+        }
+    }
+}
+
+tasks.named("check").configure {
+    dependsOn(verifyDistributionJars)
+}
+
+// Publish the bundled jar as the primary file and the DepLoader jar as an
+// explicitly named slim alternative.
 fun Any.callNoArg(methodName: String): Any? = javaClass.methods
     .first { it.name == methodName && it.parameterCount == 0 }
     .invoke(this)
@@ -263,36 +359,36 @@ plugins.withId("com.modrinth.minotaur") {
         @Suppress("UNCHECKED_CAST")
         val additionalFiles = extensions.findByName("modrinth")
             ?.callNoArg("getAdditionalFiles") as? ListProperty<Any>
-        additionalFiles?.add(fatJar)
+        additionalFiles?.add(reobfJar)
     }
     tasks.matching { it.name == "modrinth" }.configureEach {
-        dependsOn(fatJar)
+        dependsOn(fatJar, reobfJar)
     }
 }
 
 plugins.withId("net.darkhax.curseforgegradle") {
     afterEvaluate {
         tasks.named<TaskPublishCurseForge>("publishCurseforge").configure {
-            dependsOn(fatJar)
+            dependsOn(fatJar, reobfJar)
             uploadArtifacts.firstOrNull()?.let { artifact ->
                 artifact.addEnvironment("Client", "Server")
-                artifact.withAdditionalFile(fatJar).displayName = providers.provider {
-                    "$configuredModName ${project.version}-fat"
+                artifact.withAdditionalFile(reobfJar).displayName = providers.provider {
+                    "$configuredModName ${project.version}-slim"
                 }
             }
         }
     }
 }
 
+extensions.extraProperties.set("publishableObfJar", fatJar)
+extensions.extraProperties.set("publishableDevJar", fatDevJar)
 extensions.extraProperties.set("publishableFatJar", fatJar)
 afterEvaluate {
     // 67minecraft's additional-file hook.
     val extras = extensions.extraProperties
-    if (!extras.has("publishableApiJar")) {
-        extras.set("publishableApiJar", fatJar)
-    }
+    extras.set("publishableApiJar", reobfJar)
 }
 
 tasks.matching { it.name == "publish67Minecraft" }.configureEach {
-    dependsOn(fatJar)
+    dependsOn(fatJar, fatDevJar, reobfJar)
 }
